@@ -17,11 +17,6 @@
 #include "pictimer.h"
 #endif
 
-#define TIMER_IVEC 					BSP_MISC_IRQ_LOWEST_OFFSET
-#define TIMER_NO  					0	/* note that svgmWatchdog uses T3 */
-#define TIMER_PRI 					6
-#define UARG 						0
-
 #define DAEMON_SYNC_INTERVAL_SECS	60
 #define KILL_DAEMON					RTEMS_EVENT_1
 
@@ -74,6 +69,42 @@ splclock()
 #define UNIX_BASE_TO_NTP_BASE (((70UL*365UL)+17UL) * (24*60*60))
 
 #define PARANOIA(something)	assert( RTEMS_SUCCESSFUL == (something) )
+
+#define NTP_DEBUG
+
+#ifdef NTP_DEBUG
+long long rtems_ntp_max_t1;
+long long rtems_ntp_max_t2;
+long long rtems_ntp_max_t3;
+long long rtems_ntp_max_diff = 0;
+
+int
+rtems_ntp_print_maxdiff(int reset)
+{
+time_t    t;
+long long t4;
+
+	printf("Max adjust %llins\n",rtems_ntp_max_diff * NANOSECOND);
+	printf("    req. sent at (local time) %lu.%lu\n",
+				frac2sec(rtems_ntp_max_t1),frac2nsec(rtems_ntp_max_t1));
+	printf("    received at (remote time) %lu.%lu\n",
+				frac2sec(rtems_ntp_max_t2),frac2nsec(rtems_ntp_max_t2));
+	printf("    reply sent  (remote time) %lu.%lu\n",
+				frac2sec(rtems_ntp_max_t3),frac2nsec(rtems_ntp_max_t3));
+	t4 =  rtems_ntp_max_t3 - rtems_ntp_max_diff;
+
+	if ( rtems_ntp_max_t1 && rtems_ntp_max_t2 )
+		t4 +=  rtems_ntp_max_t2 - rtems_ntp_max_diff - rtems_ntp_max_t1;
+	printf("    reply received (lcl time) %lu.%lu\n",
+				frac2sec(t4),frac2nsec(t4));
+
+	t = frac2sec(t4) - rtems_bsdnet_timeoffset - UNIX_BASE_TO_NTP_BASE;
+
+	printf("Happened around %s\n", ctime(&t));
+	if ( reset )
+		rtems_ntp_max_diff = 0;
+}
+#endif
 
 /* could use ntp_gettime() for this - avoid the overhead */
 static inline void locked_nano_time(struct timespec *pt)
@@ -144,6 +175,14 @@ long long       now, diff, org, rcv;
 				diff >>=1;
 			}
 			*(long long*)usr_data = diff;
+#ifdef NTP_DEBUG
+			if ( llabs(diff) > llabs(rtems_ntp_max_diff) ) {
+				rtems_ntp_max_t1 = org;
+				rtems_ntp_max_t2 = rcv;
+				rtems_ntp_max_t3 = nts2ll( &p->transmit_timestamp );
+				rtems_ntp_max_diff = diff;
+			}
+#endif
 		}
 	}
 	return 0;
