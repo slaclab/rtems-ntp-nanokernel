@@ -16,6 +16,8 @@
  *								       *
  **********************************************************************/
 
+/* RTEMS port by Till Straumann <strauman@slac.stanford.edu>, 2004 */
+
 #include "kern.h"
 
 /*
@@ -161,20 +163,30 @@ ntp_gettime(tp)
 	struct ntptimeval *tp;	/* pointer to argument structure */
 {
 	struct ntptimeval ntv;	/* temporary structure */
+#ifndef NTP_NANO
 	struct timespec atv;	/* nanosecond time */
-	int s;			/* caller priority */
+#endif
+	int s;					/* caller priority */
+	int st;					/* time_status cache */
 
 	s = splclock();
-	nano_time(&atv);
+	st = time_status;
 #ifdef NTP_NANO
-	ntv.time.tv_sec = atv.tv_sec;
-	ntv.time.tv_nsec = atv.tv_nsec;
+	nano_time(&ntv.time);
 #else
-	if (!(time_status & STA_NANO))
+	nano_time(&atv);
+	if (!(st & STA_NANO))
 		atv.tv_nsec /= 1000;
 	ntv.time.tv_sec = atv.tv_sec;
 	ntv.time.tv_usec = atv.tv_nsec;
 #endif /* NTP_NANO */
+	/* RTEMS INFO: the time, time_status, maxerror, time_tai and time_state
+	 *             are *not* read atomically -- ISR might have updated any
+	 *             of them since reading nano_time()
+	 *             (which is supposed to read its argument atomically).
+	 *             However - I don't care! I'm more concerned about
+	 *             interrupt latency.
+	 */
 	ntv.maxerror = time_maxerror;
 	ntv.esterror = time_esterror;
 	ntv.tai = time_tai;
@@ -189,27 +201,27 @@ ntp_gettime(tp)
 	 *
 	 * Hardware or software error
 	 */
-	if ((time_status & (STA_UNSYNC | STA_CLOCKERR)) ||
+	if ((st & (STA_UNSYNC | STA_CLOCKERR)) ||
 
 	/*
 	 * PPS signal lost when either time or frequency synchronization
 	 * requested
 	 */
-	    (time_status & (STA_PPSFREQ | STA_PPSTIME) &&
-	    !(time_status & STA_PPSSIGNAL)) ||
+	    (st & (STA_PPSFREQ | STA_PPSTIME) &&
+	    !(st & STA_PPSSIGNAL)) ||
 
 	/*
 	 * PPS jitter exceeded when time synchronization requested
 	 */
-	    (time_status & STA_PPSTIME &&
-	    time_status & STA_PPSJITTER) ||
+	    (st & STA_PPSTIME &&
+	    st & STA_PPSJITTER) ||
 
 	/*
 	 * PPS wander exceeded or calibration error when frequency
 	 * synchronization requested
 	 */
-	    (time_status & STA_PPSFREQ &&
-	    time_status & (STA_PPSWANDER | STA_PPSERROR)))
+	    (st & STA_PPSFREQ &&
+	    st & (STA_PPSWANDER | STA_PPSERROR)))
 		return (TIME_ERROR);
 	return (time_state);
 }
@@ -221,6 +233,27 @@ ntp_gettime(tp)
  * that the timex.constant structure member has a dual purpose to set
  * the time constant and to set the TAI offset.
  */
+
+/* RTEMS INFO: some global variables are used by ISR-level code as well
+ *             as ntp_adjtime():
+ *                                  ISR-code              ntp_adjtime
+ *            	time_maxerror:         w                       w
+ *              time_status:           w (PPSSIGNAL only)      w 
+ *              time_state:            w                       w
+ *              time_constant:         r                       w
+ *              time_tai               w                       w
+ *              time_freq              r                       w
+ *
+ *
+ * In order to avoid long IRQ-disabled sections of code, we only
+ * attempt to atomically modify individual fields - not the
+ * entire set of data. This shouldn't disturb the algorithm
+ * as most fields can be set individually by separate calls
+ * to ntp_adjtime(). Rare cases when the user needs to atomically
+ * update multiple fields should be handled by a special routine
+ * (to be implemented by the user).
+ * We assume that the hardware writes 32-bit variables atomically.
+ */
 int
 ntp_adjtime(tp)
 	struct timex *tp;	/* pointer to argument structure */
@@ -229,6 +262,9 @@ ntp_adjtime(tp)
 	long freq;		/* frequency ns/s) */
 	int modes;		/* mode bits from structure */
 	int s;			/* caller priority */
+	long	status_mask_on  = 0;
+	long    status_mask_off = -1;
+	long    flags;
 
 	ntv = *tp;		/* copy in the argument structure */
 
@@ -242,27 +278,52 @@ ntp_adjtime(tp)
 	 * status words are reset to the initial values at boot.
 	 */
 	modes = ntv.modes;
+
+	if (modes & MOD_NANO)
+		status_mask_on |= STA_NANO;
+
+	if (modes & MOD_MICRO) {
+		status_mask_off &= ~STA_NANO;
+		status_mask_on  &= ~STA_NANO;
+	}
+
+	if (modes & MOD_CLKB)
+		status_mask_on |= STA_CLK;
+	if (modes & MOD_CLKA) {
+		status_mask_on  &= ~STA_CLK;
+		status_mask_off &= ~STA_CLK;
+	}
+
+	if (modes & MOD_STATUS) {
+		status_mask_off &= STA_RONLY;
+		status_mask_on  |= (ntv.status & ~STA_RONLY);
+	} else {
+		/* make sure STA_PLL is not clear as we test it a few lines down */
+		ntv.status |= STA_PLL;
+	}
+
 	if (ROOT)
 		return (EPERM);
 	s = splclock();
 	if (modes & MOD_MAXERROR)
-		time_maxerror = ntv.maxerror;
+		time_maxerror = ntv.maxerror;	/* RTEMS-RACE (updated by ISR in second_overflow) */
 	if (modes & MOD_ESTERROR)
-		time_esterror = ntv.esterror;
-	if (modes & MOD_STATUS) {
-		if (time_status & STA_PLL && !(ntv.status & STA_PLL)) {
-			time_state = TIME_OK;
-			time_status = STA_UNSYNC;
+		time_esterror = ntv.esterror;	/* not used by anyone else; informative only */
+	flags = CLOCK_INTERRUPT_DISABLE();
+		if ( (time_status & STA_PLL) && !(ntv.status & STA_PLL) ) {
+			time_state = TIME_OK;		/* set by IRQ-level code */
+			time_status = STA_UNSYNC;	/* set by IRQ-level code  (MODE and PPS bits only [ all RO ]) */
 #ifdef PPS_SYNC
 			pps_shift = PPS_FAVG;
 #endif /* PPS_SYNC */
 		}
-		time_status &= STA_RONLY;
-		time_status |= ntv.status & ~STA_RONLY;
-	}
+		time_status &= status_mask_off;
+		time_status |= status_mask_on;
+	CLOCK_INTERRUPT_ENABLE(flags);
+
 	if (modes & MOD_TIMECONST) {
 		if (ntv.constant < 0)
-			time_constant = 0;
+			time_constant = 0;			/* read by IRQ-level code */
 		else if (ntv.constant > MAXTC)
 			time_constant = MAXTC;
 		else
@@ -270,42 +331,36 @@ ntp_adjtime(tp)
 	}
 	if (modes & MOD_TAI) {
 		if (ntv.constant > 0)
-			time_tai = ntv.constant;
+			time_tai = ntv.constant;	/* written by IRQ-level code; assume write is atomic */
 	}
 #ifdef PPS_SYNC
 	if (modes & MOD_PPSMAX) {
 		if (ntv.shift < PPS_FAVG)
-			pps_shiftmax = PPS_FAVG;
+			pps_shiftmax = PPS_FAVG;	/* read by IRQ-level code  */
 		else if (ntv.shift > PPS_FAVGMAX)
 			pps_shiftmax = PPS_FAVGMAX;
 		else
 			pps_shiftmax = ntv.shift;
 	}
 #endif /* PPS_SYNC */
-	if (modes & MOD_NANO)
-		time_status |= STA_NANO;
-	if (modes & MOD_MICRO)
-		time_status &= ~STA_NANO;
-	if (modes & MOD_CLKB)
-		time_status |= STA_CLK;
-	if (modes & MOD_CLKA)
-		time_status &= ~STA_CLK;
 	if (modes & MOD_OFFSET) {
 		if (time_status & STA_NANO)
-			hardupdate(&TIMEVAR, ntv.offset);
+			hardupdate(&TIMEVAR, ntv.offset);	/* assume hardupdate is safe */
 		else
 			hardupdate(&TIMEVAR, ntv.offset * 1000);
 	}
 	if (modes & MOD_FREQUENCY) {
 		freq = ntv.freq / SCALE_PPM;
 		if (freq > MAXFREQ)
-			L_LINT(time_freq, MAXFREQ);
+			freq = MAXFREQ;
 		else if (freq < -MAXFREQ)
-			L_LINT(time_freq, -MAXFREQ);
-		else
-			L_LINT(time_freq, freq);
+			freq = -MAXFREQ;
+		flags = CLOCK_INTERRUPT_DISABLE();
+		/* protect 64bit entity */
+		L_LINT(time_freq, freq);
+		CLOCK_INTERRUPT_ENABLE(flags);
 #ifdef PPS_SYNC
-		pps_freq = time_freq;
+		pps_freq = time_freq;					/* pps_freq (64-bit!) is not used by IRQ-level code */
 #endif /* PPS_SYNC */
 	}
 
@@ -317,6 +372,7 @@ ntp_adjtime(tp)
 		ntv.offset = time_monitor;
 	else
 		ntv.offset = time_monitor / 1000;
+	/* IRQ-code doesn't write time_freq; reading should be safe */
 	ntv.freq = L_GINT(time_freq) * SCALE_PPM;
 	ntv.maxerror = time_maxerror;
 	ntv.esterror = time_esterror;
@@ -368,6 +424,11 @@ ntp_adjtime(tp)
  * routine second_overflow()) should be called early in the hardclock()
  * code path. 
  */
+
+/* 
+ * TSILLVARS
+ *  time_update, time_phase, time_adj, time_nano
+ */
 void
 ntp_tick_adjust(tvp, tick_update)
 #ifdef NTP_NANO
@@ -409,6 +470,11 @@ ntp_tick_adjust(tvp, tick_update)
  * routine ntp_tick_adjust(). While these two routines are normally
  * combined, they are separated here only for the purposes of
  * simulation.
+ */
+/* TSILLVARS
+ * time_maxerror, time_tai, time_state, time_status (read)
+ * time_adj, time_offset, time_constant, time_freq
+ * (PPS modifies time_status)
  */
 void
 second_overflow(tvp)
@@ -592,6 +658,13 @@ ntp_init()
  * loop is disciplined to frequency. Between 256 s and 1024 s, the mode
  * is selected by the STA_MODE status bit.
  */
+
+/* TSILLVARS
+ *
+ * time_status:   PPS stuff FREQHOLD, FLL are read;  STA_MODE is modified
+ *
+ * time_monitor, time_offset, time_reftime, time_constant, time_freq, time_status
+ */
 void
 hardupdate(tvp, offset)
 #ifdef NTP_NANO
@@ -602,7 +675,10 @@ hardupdate(tvp, offset)
 	long offset;		/* clock offset (ns) */
 {
 	long mtemp;
-	l_fp ftemp;
+	l_fp ftemp, ftemp1;
+	long flags;
+	long reftime;
+	int  st;
 
 	/*
 	 * Select how the phase is to be controlled and from which
@@ -612,16 +688,27 @@ hardupdate(tvp, offset)
 	 */
 	if (!(time_status & STA_PLL))
 		return;
-	if (!(time_status & STA_PPSTIME && time_status &
-	    STA_PPSSIGNAL)) {
-		if (offset > MAXPHASE)
-			time_monitor = MAXPHASE;
-		else if (offset < -MAXPHASE)
-			time_monitor = -MAXPHASE;
-		else
-			time_monitor = offset;
+
+	if (offset > MAXPHASE)
+		time_monitor = MAXPHASE;
+	else if (offset < -MAXPHASE)
+		time_monitor = -MAXPHASE;
+	else
+		time_monitor = offset;
+
+	/* caution: time_offset and *tvp are shared with IRQ-level routines */
+	flags = CLOCK_INTERRUPT_DISABLE();
+	/* caching time_status is safe; none of the bits (other than PPSSIGNAL 
+	 * --- even if PPSSIGNAL changes we should be ok as long as we work
+	 * on the cached copy) is changed by interrupt-level routines 
+	 * (adj_ticks/second_overflow)
+	 */
+	st = time_status;
+	if ( ((st & (STA_PPSTIME | STA_PPSSIGNAL)) ^ (STA_PPSTIME | STA_PPSSIGNAL)) ) {
 		L_LINT(time_offset, time_monitor);
 	}
+	reftime = tvp->tv_sec;
+	CLOCK_INTERRUPT_ENABLE(flags);
 
 	/*
 	 * Select how the frequency is to be controlled and in which
@@ -629,30 +716,39 @@ hardupdate(tvp, offset)
 	 * to discipline the frequency, the PPS frequency is used;
 	 * otherwise, the argument offset is used to compute it.
 	 */
-	if (time_status & STA_PPSFREQ && time_status & STA_PPSSIGNAL) {
-		time_reftime = tvp->tv_sec;
+	if ( (st & STA_PPSFREQ) && (st & STA_PPSSIGNAL) ) {
+		time_reftime = reftime;
 		return;
 	}
-	if (time_status & STA_FREQHOLD || time_reftime == 0)
-		time_reftime = tvp->tv_sec;
-	mtemp = tvp->tv_sec - time_reftime;
+	if ( (st & STA_FREQHOLD) || time_reftime == 0)
+		time_reftime = reftime;
+	mtemp = reftime - time_reftime;
 	L_LINT(ftemp, time_monitor);
 	L_RSHIFT(ftemp, (SHIFT_PLL + 2 + time_constant) << 1);
 	L_MPY(ftemp, mtemp);
-	L_ADD(time_freq, ftemp);
-	time_status &= ~STA_MODE;
-	if (mtemp >= MINSEC && (time_status & STA_FLL || mtemp >
+	/* unprotected read from time_freq is OK; not modified at ISR level */
+	ftemp1 = time_freq;
+	L_ADD(ftemp1, ftemp);
+	st &= ~STA_MODE;
+	if (mtemp >= MINSEC && (st & STA_FLL || mtemp >
 	    MAXSEC)) {
 		L_LINT(ftemp, (time_monitor << 4) / mtemp);
 		L_RSHIFT(ftemp, SHIFT_FLL + 4);
-		L_ADD(time_freq, ftemp);
-		time_status |= STA_MODE;
+		L_ADD(ftemp1, ftemp);
+		st |= STA_MODE;
 	}
-	time_reftime = tvp->tv_sec;
-	if (L_GINT(time_freq) > MAXFREQ)
-		L_LINT(time_freq, MAXFREQ);
-	else if (L_GINT(time_freq) < -MAXFREQ)
-		L_LINT(time_freq, -MAXFREQ);
+	time_reftime = reftime;
+	if (L_GINT(ftemp1) > MAXFREQ)
+		L_LINT(ftemp1, MAXFREQ);
+	else if (L_GINT(ftemp1) < -MAXFREQ)
+		L_LINT(ftemp1, -MAXFREQ);
+	flags = CLOCK_INTERRUPT_DISABLE();
+	time_freq = ftemp1;
+	if ( st & STA_MODE )
+		time_status |= STA_MODE;
+	else
+		time_status &= STA_MODE;
+	CLOCK_INTERRUPT_ENABLE(flags);
 }
 
 #ifdef PPS_SYNC

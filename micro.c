@@ -144,7 +144,11 @@ nano_time(tsp)
 	int i, s;
 
 	i = cpu_number();		/* read the time on this CPU */
+#ifndef __rtems__
 	s = splsched();
+#else
+	s = CLOCK_INTERRUPT_DISABLE();
+#endif
 	pcc = nano_time_rpcc(&t);
 
 	/*
@@ -201,7 +205,11 @@ nano_time(tsp)
 	}
 	*tsp = t;
 	lasttime = *tsp;
+#ifndef __rtems__
 	splx(s);
+#else
+	CLOCK_INTERRUPT_ENABLE(s);
+#endif
 	psec += pcc_master[i];
 	return ((long)psec);
 }
@@ -234,12 +242,20 @@ microset()
 {
 	struct timespec t, u;		/* nanosecond time */
 	int64_t pcc, numer, denom;	/* 64-bit temporaries */
+#ifndef __rtems__
 	int i, s;
+#else
+	int i;
+#endif
 
 	i = cpu_number();		/* read the time on this CPU */
+#ifndef __rtems__
 	s = splextreme();
+#endif
 	pcc = nano_time_rpcc(&t);
+#ifndef __rtems__
 	splx(s);
+#endif
 
 	/*
 	 * Intialize for first reading. Use the processor rate from the

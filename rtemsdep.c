@@ -13,7 +13,6 @@
 #include "timex.h"
 
 #define TIMER_IVEC 					BSP_MISC_IRQ_LOWEST_OFFSET
-#define TIMER_NO  					0	/* note that svgmWatchdog uses T3 */
 #define TIMER_PRI 					6
 #define UARG 						0
 
@@ -43,6 +42,7 @@ unsigned      rtems_ntp_debug = 0;
 unsigned      rtems_ntp_daemon_sync_interval_secs = DAEMON_SYNC_INTERVAL_SECS;
 FILE		  *rtems_ntp_debug_file;
 
+
 static void isr(void *arg)
 {
 	ntp_tick_adjust(&TIMEVAR, 0);
@@ -66,7 +66,9 @@ static void isr(void *arg)
 long nano_time(struct timespec *tp)
 {
 long cnt,tgl;
+int  flags;
 
+	flags = CLOCK_INTERRUPT_DISABLE();
 #ifdef NTP_NANO
 	*tp = TIMEVAR;
 #else
@@ -74,6 +76,8 @@ long cnt,tgl;
 	tp->tv_nsec = TIMEVAR.tv_usec * 1000;
 #endif
 	tgl = cnt = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
+	CLOCK_INTERRUPT_ENABLE(flags);
+	
 	cnt &= ~ OPENPIC_TIMER_TOGGLE;
 	if ( (tgl ^ rtems_ntp_nano_ticks) & OPENPIC_TIMER_TOGGLE ) {
 		/* timer rolled over but ISR hadn't had a chance to
@@ -83,8 +87,8 @@ long cnt,tgl;
 	}
 	/* OPENPIC timer runs backwards */
 	cnt = base_count - cnt;
-	/* accept some roundoff error */
-	tp->tv_nsec += cnt * timer_period_ns;
+	/* accept some roundoff error - should we adjust the frequency ? */
+	tp->tv_nsec += cnt * ( timer_period_ns /* + time_freq */ );
 	/* assume the tick timer is running faster than 1Hz */
 	if ( tp->tv_nsec >= NANOSECOND ) {
 		tp->tv_nsec-=NANOSECOND;
@@ -101,14 +105,6 @@ long cnt,tgl;
  */
 #define UNIX_BASE_TO_NTP_BASE (((70UL*365UL)+17UL) * (24*60*60))
 
-/* could use ntp_gettime() for this - avoid the overhead */
-static inline void locked_nano_time(struct timespec *pt)
-{
-unsigned long flags;
-	rtems_interrupt_disable(flags);
-	nano_time(pt);
-	rtems_interrupt_enable(flags);
-}
 
 static int copyPacketCb(struct ntpPacketSmall *p, int state, void *usr_data)
 {
@@ -144,7 +140,7 @@ struct timespec nowts;
 long long       now, diff, org, rcv;
 	
 	if ( state >= 0 ) {
-		locked_nano_time(&nowts);
+		nano_time(&nowts);
 		now = nsec2frac(nowts.tv_nsec);
 		/* convert RTEMS to NTP seconds */
 		nowts.tv_sec += rtems_bsdnet_timeoffset + UNIX_BASE_TO_NTP_BASE;
@@ -184,27 +180,46 @@ ntppack(void *p)
 	return rtems_bsdnet_get_ntp(-1,copyPacketCb,p);
 }
 
+static unsigned sec2tconst(int secs)
+{
+int tc;
+	for ( tc = 0; secs > 0 && tc < MAXTC; secs>>=1 )
+		tc++;
+	return tc;
+}
+
 static rtems_task
 ntpDaemon(rtems_task_argument sync)
 {
 rtems_status_code     rc;
-rtems_interval        rate;
+rtems_interval        rate, interval = 0;
 rtems_event_set       got;
 long                  nsecs;
 
 	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
 
+	interval = rtems_ntp_daemon_sync_interval_secs;
+
 	while ( RTEMS_TIMEOUT == (rc = rtems_event_receive(
 									KILL_DAEMON,
 									RTEMS_WAIT | RTEMS_EVENT_ANY,
-									rate * rtems_ntp_daemon_sync_interval_secs,
+									rate * interval,
 									&got )) ) {
+
+		if ( interval != rtems_ntp_daemon_sync_interval_secs ) {
+			extern long time_constant;
+			interval = rtems_ntp_daemon_sync_interval_secs;
+			/* TODO: we probably should use ntp_adjtime() for this
+			 *       but it seems like a lot of overhead!
+			 */
+			time_constant = sec2tconst(interval);
+		}
 #if 0
 		struct timespec       here;
 		long			      secs;
 		struct ntpPacketSmall p;
 		if ( 0 == rtems_bsdnet_get_ntp(-1, copyPacketCb, &p) ) {
-			locked_nano_time(&here);
+			nano_time(&here);
 			/* convert NTP to RTEMS seconds */
 			secs   = ntohl(p.transmit_timestamp.integer);
 			secs  -= rtems_bsdnet_timeoffset + UNIX_BASE_TO_NTP_BASE;
@@ -251,7 +266,11 @@ long                  nsecs;
 	if ( RTEMS_SUCCESSFUL == rc && (KILL_DAEMON==got) ) {
 		rtems_semaphore_release(kill_sem);
 	}
-	rtems_task_delete( RTEMS_SELF );
+	/* DONT delete ourselves; note the race condition - our creator
+	 * who sent the KILL event might get the CPU and remove us from
+	 * memory before we get a chance to delete!
+	 */
+	rtems_task_suspend( RTEMS_SELF );
 }
 
 void
@@ -264,8 +283,8 @@ struct timespec       initime;
 	ntv.offset = 0;
 	ntv.freq = 0;
 	ntv.status = STA_PLL;
-	ntv.constant = 0;
-	ntv.modes = MOD_STATUS | MOD_NANO;
+	ntv.constant = sec2tconst( rtems_ntp_daemon_sync_interval_secs );
+	ntv.modes = MOD_STATUS | MOD_NANO | MOD_TIMECONST;
 
 	rtems_ntp_debug_file = stdout;
 
@@ -324,6 +343,7 @@ _cexpModuleFinalize(void *handle)
 			rtems_event_send( daemon_id, KILL_DAEMON );
 			rtems_semaphore_obtain( kill_sem, RTEMS_WAIT, RTEMS_NO_TIMEOUT );
 			rtems_semaphore_delete( kill_sem );	
+			rtems_task_delete( daemon_id );
 			return 0;
 		}
 	}
@@ -352,13 +372,13 @@ struct timex ntp;
 	memset( &ntp, 0, sizeof(ntp) );
 	if ( 0 == ntp_adjtime( &ntp ) ) {
 		fprintf(stderr,"Current Timex Values:\n");
-		fprintf(stderr,"            time offset %11li "UNITS"\n",  ntp.offset);
+		fprintf(stderr,"            time offset %11li  "UNITS"\n", ntp.offset);
 		fprintf(stderr,"       frequency offset %11.3f ""ppm""\n", (double)ntp.freq/PPM_SCALED);
-		fprintf(stderr,"             max  error %11li ""uS""\n",   ntp.maxerror);
-		fprintf(stderr,"        estimated error %11li ""uS""\n",   ntp.esterror);
-		fprintf(stderr,"          poll interval %11li ""S""\n",    1<<ntp.constant);
-		fprintf(stderr,"              precision %11li "UNITS"\n",  ntp.precision);
-		fprintf(stderr,"              tolerance %11li ""ppm""\n",  (double)ntp.tolerance/PPM_SCALED);
+		fprintf(stderr,"             max  error %11li  ""uS""\n",  ntp.maxerror);
+		fprintf(stderr,"        estimated error %11li  ""uS""\n",  ntp.esterror);
+		fprintf(stderr,"          poll interval %11i   ""S""\n",   1<<ntp.constant);
+		fprintf(stderr,"              precision %11li  "UNITS"\n", ntp.precision);
+		fprintf(stderr,"              tolerance %11.3f ""ppm""\n", (double)ntp.tolerance/PPM_SCALED);
 		fprintf(stderr,"    PLL updates enabled %s\n", yesno(&ntp, STA_PLL));
 		fprintf(stderr,"       FLL mode enabled %s\n", yesno(&ntp, STA_FLL));
 		fprintf(stderr,"            insert leap %s\n", yesno(&ntp, STA_INS));

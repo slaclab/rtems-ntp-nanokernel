@@ -141,6 +141,8 @@ extern struct timeval TIMEVAR;	/* kernel microsecond clock */
 #ifndef __rtems__
 extern int hz;			/* tick interrupt frequency (Hz) */
 extern int splextreme(), splsched(), splclock(), splx();
+#define CLOCK_INTERRUPT_DISABLE() (0)
+#define CLOCK_INTERRUPT_ENABLE(f) do {} while (0)
 #else
 #include "rtemsdep.h"
 #define hz TIMER_FREQ

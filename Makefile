@@ -5,7 +5,7 @@
 # 	Template leaf node Makefile
 #
 
-USE_MICRO=YES
+USE_MICRO=NO
 
 # C source names, if any, go here -- minus the .c
 C_PIECES=ktime rtemsdep $(C_PIECES_USE_MICRO_$(USE_MICRO))
