@@ -3,8 +3,7 @@
 
 /* there might be mild dependencies on sizeof(pcc_t) being >= sizeof(long) */
 #define PCC_WIDTH 32
-typedef long pcc_t;
-typedef long pcc_base_t; /* opaque; to be used by implementation */
+typedef unsigned long pcc_t;
 
 /* There are two methods for implementing nanosecond
  * clock resolution:
@@ -98,7 +97,7 @@ unsigned		rtemsTicks;
 	 */
 	rtemsTicks = rtemsTicks - tick_base;
 
-	return pcc + Clock_Decrementer_value * (unsigned long long)rtemsTicks;
+	return pcc + Clock_Decrementer_value * rtemsTicks;
 }
 
 static inline pcc_t setPccBase()

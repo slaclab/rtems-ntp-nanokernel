@@ -15,9 +15,9 @@
 #include "pcc.h"
 
 #define TIMER_IVEC 					BSP_MISC_IRQ_LOWEST_OFFSET
-#define TIMER_NO  					0	/* note that svgmWatchdog uses T3 */
 #define TIMER_PRI 					6
-#define UARG 						0
+
+#define NumberOf(arr)				(sizeof((arr))/sizeof((arr)[0]))
 
 static unsigned long base_count;
 static unsigned long timer_period_ns;
@@ -27,16 +27,16 @@ unsigned rtems_ntp_pictimer_irqs_missed = 0;
 
 extern rtems_id rtems_ntp_ticker_id;
 
+#ifdef USE_PICTIMER
+
 #ifndef USE_METHOD_B_FOR_DEMO
-unsigned nano_ticks;
+volatile unsigned nano_ticks;
 #endif
 
-static void isr(void *arg)
+static void clock_isr(void *arg)
 {
 #ifdef USE_METHOD_B_FOR_DEMO
 	rtems_ntp_isr_snippet();
-#else	
-	nano_ticks = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
 #endif
 
 	if ( RTEMS_SUCCESSFUL != rtems_event_send(rtems_ntp_ticker_id, PICTIMER_SYNC_EVENT) )
@@ -48,23 +48,14 @@ pcc_t
 getPcc()
 {
 pcc_t cnt,tgl;
-unsigned flags;
-
-	/* disable timer ticks */
-	flags = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority );
-	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority, flags | OPENPIC_MASK );
-
 
 	cnt = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
 	tgl = cnt ^ nano_ticks;
 
-	/* reenable timer ticks */
-	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority, flags );
-
 	cnt &= ~ OPENPIC_TIMER_TOGGLE;
 	if ( tgl & OPENPIC_TIMER_TOGGLE ) {
-		/* timer rolled over but ISR hadn't had a chance to
-		 * execute ntp_tick_adjust()
+		/* timer rolled over but ticker task hadn't had a chance to
+		 * execute ntp_tick_adjust() yet.
 		 */
 		cnt-=base_count;
 	}
@@ -77,85 +68,109 @@ unsigned flags;
 pcc_t
 setPccBase()
 {
+	nano_ticks = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
 	return base_count;
 }
 #endif
+#endif
 
-static int timerConnected = 0;
+/* on SVGM; timer 3 is the watchdog -- reserve it */
+static void (*timerConnected[4])() = { 0, 0, (void (*)(void*))-1, 0 };
 
-int pictimerInstall()
+int pictimerInstall(unsigned timer_no, int pri, int freq, void (*isr)(void*))
 {
 unsigned              tmp;
 
-	if ( timerConnected ) {
-		fprintf(stderr,"OpenPIC Timer #%i already connected\n", TIMER_NO);
+	if ( timer_no >= NumberOf(timerConnected) ) {
+		fprintf(stderr,"Invalid timer instance %i; (0..3 allowed)\n", timer_no);
 		return -1;
 	}
 
-#if 0 /* just use compile-time constants for now */
-	if ( instance > 3 ) {
-		fprintf(stderr,"Invalid timer instance %i; (0..3 allowed)\n",
-				instance);
+	if ( timerConnected[timer_no] ) {
+		fprintf(stderr,"OpenPIC Timer #%i already connected\n", timer_no);
 		return -1;
 	}
 
-	if ( miscvec >= BSP_MISC_IRQ_NUMBER ) {
-		fprintf(stderr,"Invalid Openpic MISC vector number %i; (0..%i allowed)\n",
-				miscvec, BSP_MISC_IRQ_NUMBER-1);
+	if ( pri > 15 || pri < 1 ) {
+		fprintf(stderr,"Invalid timer IRQ priority %i (1..15 allowed)\n",pri);
 		return -1;
 	}
 
-	timer_intvec = BSP_MISC_IRQ_LOWEST_OFFSET + miscvec;
-#endif
+	printf("Using OpenPIC Timer #%i at %p\n", timer_no, &OpenPIC->Global.Timer[timer_no]);
 
-	printf("Using OpenPIC Timer #%i at %p\n", TIMER_NO, &OpenPIC->Global.Timer[TIMER_NO]);
+	timer_period_ns = NANOSECOND / in_le32( &OpenPIC->Global.Timer_Frequency );
 
-	base_count = (tmp = in_le32( &OpenPIC->Global.Timer_Frequency )) / TIMER_FREQ;
-	timer_period_ns = NANOSECOND / tmp;
-	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Base_Count, OPENPIC_MASK | base_count );
-	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Base_Count, base_count );
+	/* freq < 0 means they want to specify a period in ticks directly */
+	if ( freq < 0 )
+		tmp = -freq;
+	else
+		tmp = in_le32( &OpenPIC->Global.Timer_Frequency ) / freq;
+
+	out_le32( &OpenPIC->Global.Timer[timer_no].Base_Count, OPENPIC_MASK | tmp );
+	out_le32( &OpenPIC->Global.Timer[timer_no].Base_Count, tmp );
 	/* map to 1st CPU */
-	openpic_maptimer(TIMER_NO, 1);
-	if ( 0 == bspExtInstallSharedISR( TIMER_IVEC, isr, UARG, BSPEXT_ISR_NONSHARED ) ) {
-		openpic_inittimer( TIMER_NO, TIMER_PRI, TIMER_IVEC );
-		timerConnected = 1;
+	openpic_maptimer(timer_no, 1);
+	if ( 0 == bspExtInstallSharedISR( TIMER_IVEC + timer_no, isr, (void*)timer_no, BSPEXT_ISR_NONSHARED ) ) {
+		openpic_inittimer( timer_no, pri, TIMER_IVEC + timer_no );
+		timerConnected[timer_no] = isr;
 		return 0;
 	}
-	fprintf(stderr,"Unable to install shared ISR for OpenPIC Timer #%i\n",TIMER_NO);
+	fprintf(stderr,"Unable to install shared ISR for OpenPIC Timer #%i\n",timer_no);
 	return -1;
 }
 
+#ifdef USE_PICTIMER
 int
-pictimerCleanup()
+pictimerInstallClock(unsigned timer_no)
 {
-	if ( !timerConnected )
+	if ( ! pictimerInstall(timer_no, TIMER_PRI, TIMER_FREQ, clock_isr) ) {
+		base_count      = in_le32( &OpenPIC->Global.Timer[timer_no].Base_Count );
+		base_count     &= ~OPENPIC_MASK;
 		return 0;
-	openpic_inittimer( TIMER_NO, 0, 0 );
-	openpic_maptimer( TIMER_NO, 0 );
+	}
+	return -1;
+}
+#endif
+
+int
+pictimerCleanup(unsigned timer_no)
+{
+	if ( timer_no >= NumberOf(timerConnected) || !timerConnected[timer_no] )
+		return 0;
+
+	openpic_inittimer( timer_no, 0, 0 );
+	openpic_maptimer( timer_no, 0 );
 	
-	if ( bspExtRemoveSharedISR(TIMER_IVEC, isr, UARG) ) {
-		fprintf(stderr,"Unable to remove shared ISR for OpenPIC Timer #%i\n",TIMER_NO);
+	if ( bspExtRemoveSharedISR(TIMER_IVEC + timer_no, timerConnected[timer_no], (void*)timer_no) ) {
+		fprintf(stderr,"Unable to remove shared ISR for OpenPIC Timer #%i\n",timer_no);
 		return -1;
 	}
-	timerConnected = 0;
+	timerConnected[timer_no] = 0;
 	return 0;
 }
 
 unsigned
-pictimerEnable(int v)
+pictimerEnable(unsigned timer_no, int v)
 {
 unsigned tmp;
-	tmp = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority );
+
+	if ( timer_no > NumberOf(timerConnected) )
+		return -1;
+
+	tmp = in_le32( &OpenPIC->Global.Timer[timer_no].Vector_Priority );
 	if ( v )
-		out_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority, tmp & ~OPENPIC_MASK );
+		out_le32( &OpenPIC->Global.Timer[timer_no].Vector_Priority, tmp & ~OPENPIC_MASK );
 	return tmp;
 }
 
 unsigned
-pictimerDisable()
+pictimerDisable(unsigned timer_no)
 {
 unsigned tmp;
-	tmp = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority );
-	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority, tmp | OPENPIC_MASK );
+	if ( timer_no > NumberOf(timerConnected) )
+		return -1;
+
+	tmp = in_le32( &OpenPIC->Global.Timer[timer_no].Vector_Priority );
+	out_le32( &OpenPIC->Global.Timer[timer_no].Vector_Priority, tmp | OPENPIC_MASK );
 	return !(tmp | OPENPIC_MASK);
 }

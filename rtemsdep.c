@@ -55,7 +55,7 @@ static rtems_id sysclk_irq_id = 0;
 
 volatile unsigned      rtems_ntp_debug = 1;
 volatile unsigned      rtems_ntp_daemon_sync_interval_secs = DAEMON_SYNC_INTERVAL_SECS;
-volatile FILE		  *rtems_ntp_debug_file;
+FILE		  		   *rtems_ntp_debug_file;
 
 int
 splx(int level)
@@ -305,6 +305,7 @@ goto firsttime;
 			else
 				nsecs = frac2nsec(diff);
 
+#ifdef PROFILER
 			locked_hardupdate( nsecs ); 
 
 			if ( rtems_ntp_debug ) {
@@ -317,6 +318,7 @@ goto firsttime;
 					printf("Update diff %li %sseconds\n", secs ? secs : nsecs, secs ? "" : "nano");
 				}
 			}
+#endif
 		}
 
 firsttime:
@@ -340,20 +342,25 @@ firsttime:
 
 static unsigned long pcc_numerator;
 static unsigned long pcc_denominator = 0;
+#ifdef NTP_NANO
+static struct timespec	nanobase;
+#else
+static struct timeval	nanobase;
+#endif
 
 long
 nano_time(struct timespec *tp)
 {
 unsigned long long pccl;
 
-#ifdef NTP_NANO
-	*tp = TIMEVAR;
-#else
-	tp->tv_sec   = TIMEVAR.tv_sec;
-	tp->tv_nsec  = TIMEVAR.tv_usec * 1000;
-#endif
-
 	pccl = getPcc();
+
+#ifdef NTP_NANO
+	*tp = nanobase;
+#else
+	tp->tv_sec   = nanobase.tv_sec;
+	tp->tv_nsec  = nanobase.tv_usec * 1000;
+#endif
 
 	/* convert to nanoseconds */
 	if ( pcc_denominator ) {
@@ -376,28 +383,25 @@ static inline void
 ticker_body()
 {
 int s;
-#ifdef NTP_NANO
-struct timespec ts;
-#else
-struct timeval  ts;
-#endif
+unsigned flags;
 
 	s = splclock();
-
-	ts = TIMEVAR;
 
 	ntp_tick_adjust(&TIMEVAR, 0);
 	second_overflow(&TIMEVAR);
 
+	rtems_interrupt_disable(flags);
 	pcc_denominator = setPccBase();
 	pcc_numerator   = 
 #ifdef NTP_NANO
-		TIMEVAR.tv_nsec - ts.tv_nsec 
+		TIMEVAR.tv_nsec - nanobase.tv_nsec 
 #else
-		(TIMEVAR.tv_usec - ts.tv_usec) * 1000
+		(TIMEVAR.tv_usec - nanobase.tv_usec) * 1000
 #endif
-		+ (TIMEVAR.tv_sec - ts.tv_sec) * NANOSECOND
+		+ (TIMEVAR.tv_sec - nanobase.tv_sec) * NANOSECOND
 		;
+	nanobase = TIMEVAR;
+	rtems_interrupt_enable(flags);
 
 	splx(s);
 }
@@ -492,7 +496,7 @@ struct timespec       initime;
 	ntp_adjtime(&ntv);
 
 #ifdef USE_PICTIMER
-	if ( pictimerInstall( &rtems_ntp_ticker_id ) ) {
+	if ( pictimerInstallClock( TIMER_NO ) ) {
 		return;
 	}
 #endif
@@ -551,8 +555,9 @@ struct timespec       initime;
 
 #ifdef USE_PICTIMER
 	/* start timer */
-	pictimerEnable(1);
+	pictimerEnable(TIMER_NO, 1);
 #endif
+	pictimerProfileInstall();
 }
 
 int
@@ -560,7 +565,7 @@ _cexpModuleFinalize(void *handle)
 {
 
 #ifdef USE_PICTIMER
-	if ( pictimerCleanup() ) {
+	if ( pictimerCleanup(TIMER_NO) ) {
 		return -1;
 	}
 #endif
@@ -599,7 +604,7 @@ _cexpModuleFinalize(void *handle)
 
 	if ( mutex_id )
 		PARANOIA( rtems_semaphore_delete( mutex_id ) );
-	return 0;
+	return pictimerProfileCleanup();
 }
 
 #ifdef NTP_NANO
