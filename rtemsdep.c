@@ -7,8 +7,10 @@
 
 #include <rtems.h>
 #include <bsp.h>
+/*
 #include <bsp/bspExt.h>
 #include <bsp/irq.h>
+*/
 #include <rtems/rtems_bsdnet.h>
 #include <netinet/in.h>
 #include <string.h>
@@ -28,7 +30,7 @@
 
 
 /* =========== CONFIG PARAMETERS ===================== */
-#define USE_PROFILER
+#undef USE_PROFILER
 
 #define NTP_DEBUG (0)
 /* define to OR or the following: */
