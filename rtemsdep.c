@@ -28,8 +28,9 @@
 
 
 /* =========== CONFIG PARAMETERS ===================== */
+#define USE_PROFILER
 
-#define NTP_DEBUG (NTP_DEBUG_FILTER)
+#define NTP_DEBUG (0)
 /* define to OR or the following: */
 #define		NTP_DEBUG_PACKSTATS     1   /* gather NTP packet timing info */
 #define		NTP_DEBUG_MISC          2   /* misc utils (beware of symbol clashes) */
@@ -339,18 +340,16 @@ rtems_status_code     rc;
 rtems_interval        rate;
 rtems_event_set       got;
 long                  nsecs;
-int                   pollsecs = 0, retry;
+int                   retry;
 DiffTimeCbDataRec     d;
 
 	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
 
 
-goto firsttime;
-
 	while ( RTEMS_TIMEOUT == (rc = rtems_event_receive(
 									KILL_DAEMON,
 									RTEMS_WAIT | RTEMS_EVENT_ANY,
-									rate * pollsecs,
+									rate * rtems_ntp_daemon_sync_interval_secs,
 									&got )) ) {
 		for ( retry = 0; retry < 3; retry++  ) {
 
@@ -367,7 +366,7 @@ goto firsttime;
 			else
 				nsecs = frac2nsec(d.diff);
 
-#ifndef USE_PROFILER
+#ifndef USE_PROFILER_RAW
 			locked_hardupdate( nsecs ); 
 
 			if ( rtems_ntp_debug ) {
@@ -385,14 +384,7 @@ goto firsttime;
 
 		}
 
-firsttime:
-		if ( rtems_ntp_daemon_sync_interval_secs != pollsecs ) {
-			struct timex ntv;
-			pollsecs = rtems_ntp_daemon_sync_interval_secs;
-			ntv.constant = secs2tcld(pollsecs);
-			ntv.modes    = MOD_TIMECONST;
-			ntp_adjtime(&ntv);
-		}
+		/* TODO: sync / calibrate hwclock hook */
 	}
 	if ( RTEMS_SUCCESSFUL == rc && (KILL_DAEMON==got) ) {
 		rtems_semaphore_release(kill_sem);
@@ -414,11 +406,12 @@ static struct timeval	nanobase;
 
 unsigned long long lasttime = 0;
 
-long
+pcc_t
 nano_time(struct timespec *tp)
 {
 
 unsigned long long pccl, thistime;
+pcc_t	rval;
 
 	pccl = getPcc();
 
@@ -428,6 +421,8 @@ unsigned long long pccl, thistime;
 	tp->tv_sec   = nanobase.tv_sec;
 	tp->tv_nsec  = nanobase.tv_usec * 1000;
 #endif
+
+	rval = pccl;
 
 	/* convert to nanoseconds */
 	if ( pcc_denominator ) {
@@ -450,8 +445,12 @@ unsigned long long pccl, thistime;
 		tp->tv_nsec = thistime % NANOSECOND;
 	}
 
-	return 0;
+	return rval;
 }
+
+unsigned long tsillticks=0;
+
+extern unsigned long long time_adj;
 
 static inline void
 ticker_body()
@@ -465,6 +464,8 @@ unsigned flags;
 	second_overflow(&TIMEVAR);
 
 	rtems_interrupt_disable(flags);
+tsillticks++;
+
 	pcc_denominator = setPccBase();
 	pcc_numerator   = 
 #ifdef NTP_NANO
@@ -541,15 +542,23 @@ rtems_event_set		got;
 #endif
 
 void
-_cexpModuleInitialize(void *handle)
+rtemsNtpInitialize(unsigned tickerPri, unsigned daemonPri)
 {
 struct timex          ntv;
 struct timespec       initime;
 
+	if ( ! tickerPri ) {
+		tickerPri = 30; /* higher than network and most other things */
+	}
+	if ( ! daemonPri ) {
+		daemonPri = 40;
+	}
+	/* TODO: recover frequency from NVRAM; read time from hwclock */
+
 	ntv.offset = 0;
 	ntv.freq = 0;
 	ntv.status = STA_PLL;
-	ntv.constant = secs2tcld(rtems_ntp_daemon_sync_interval_secs);
+	ntv.constant = secs2tcld(10);
 	ntv.modes = MOD_STATUS | MOD_NANO |
 	            MOD_TIMECONST |
 	            MOD_OFFSET | MOD_FREQUENCY;
@@ -598,8 +607,8 @@ struct timespec       initime;
 
 	if ( RTEMS_SUCCESSFUL != rtems_task_create(
 								rtems_build_name('C','L','K','d'),
-								80,
-								1000,
+								tickerPri,
+								RTEMS_MINIMUM_STACK_SIZE,
 								RTEMS_DEFAULT_MODES,
 								RTEMS_DEFAULT_ATTRIBUTES,
 								&rtems_ntp_ticker_id) ||
@@ -610,8 +619,8 @@ struct timespec       initime;
 
 	if ( RTEMS_SUCCESSFUL != rtems_task_create(
 								rtems_build_name('N','T','P','d'),
-								120,
-								10000,
+								daemonPri,
+								RTEMS_MINIMUM_STACK_SIZE,
 								RTEMS_DEFAULT_MODES,
 								RTEMS_DEFAULT_ATTRIBUTES | RTEMS_FLOATING_POINT,
 								&daemon_id) ||
@@ -636,8 +645,7 @@ struct timespec       initime;
 #endif
 }
 
-int
-_cexpModuleFinalize(void *handle)
+int rtemsNtpCleanup()
 {
 
 #ifdef USE_PICTIMER
@@ -686,6 +694,13 @@ _cexpModuleFinalize(void *handle)
 	return 0;
 #endif
 }
+
+int
+_cexpModuleFinalize(void *handle)
+{
+	return rtemsNtpCleanup();
+}
+
 
 #ifdef NTP_NANO
 #define UNITS	"nS"

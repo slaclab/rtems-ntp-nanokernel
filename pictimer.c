@@ -8,18 +8,20 @@
 
 #include <cexp.h>
 
+#include "pictimer.h"
+
+#ifdef USE_PICTIMER
+#include "timex.h"
+#include "pcc.h"
 #include "kern.h"
 #include "rtemsdep.h"
-#include "timex.h"
-#include "pictimer.h"
-#include "pcc.h"
+#endif
 
 #define TIMER_IVEC 					BSP_MISC_IRQ_LOWEST_OFFSET
 #define TIMER_PRI 					6
 
 #define NumberOf(arr)				(sizeof((arr))/sizeof((arr)[0]))
 
-static unsigned long base_count;
 static unsigned long timer_period_ns;
 
 
@@ -44,6 +46,9 @@ static void clock_isr(void *arg)
 }
 
 #ifndef USE_METHOD_B_FOR_DEMO
+
+static unsigned long base_count;
+
 pcc_t
 getPcc()
 {
@@ -98,7 +103,7 @@ unsigned              tmp;
 
 	printf("Using OpenPIC Timer #%i at %p\n", timer_no, &OpenPIC->Global.Timer[timer_no]);
 
-	timer_period_ns = NANOSECOND / in_le32( &OpenPIC->Global.Timer_Frequency );
+	timer_period_ns = 1000000000 / in_le32( &OpenPIC->Global.Timer_Frequency );
 
 	/* freq < 0 means they want to specify a period in ticks directly */
 	if ( freq < 0 )
