@@ -124,10 +124,20 @@ extern void ntp_init(void);
 extern void hardpps(struct timespec *, long);
 extern long nano_time(struct timespec *);
 extern void microset(void);
+
+/* allow for running in task driven mode: 
+ * ISR calls rpcc() and notifies the task
+ *     passing the return value;
+ * TASK calls microset_from_saved(pcc, &TIMEVAR) using the
+ *     value saved by the ISR. The call must be issued PRIOR
+ *     to updating TIMEVAR (ntp_tick_adjust).
+ */
+#include "pcc.h"
+extern void microset_from_saved(pcc_t pcc, struct timespec *tsp);
+
 extern int cpu_number(void);
-#ifndef __rtems__
-extern long long rpcc(void);
-#endif
+
+
 extern int ntp_adjtime(struct timex *);
 
 /*
@@ -138,12 +148,10 @@ extern struct timespec TIMEVAR;	/* kernel nanosecond clock */
 #else
 extern struct timeval TIMEVAR;	/* kernel microsecond clock */
 #endif /* NTP_NANO */
-#ifndef __rtems__
 extern int hz;			/* tick interrupt frequency (Hz) */
 extern int splextreme(), splsched(), splclock(), splx();
-#else
+#ifdef __rtems__
 #include "rtemsdep.h"
-#define hz TIMER_FREQ
 #endif
 
 /*

@@ -66,7 +66,6 @@
  * bits.
  */
 #define TIME_READ(t)	((t) = TIMEVAR) /* read microsecond clock */
-#define PCC_WIDTH 	32	/* significant bits of PCC counter */
 
 /*
  * The following arrays are used to discipline the time in each
@@ -89,7 +88,7 @@ long master_pcc;		/* master PCC at interrupt (ns) */
  * is less than the machine word, but in no case less than PCC_WIDTH
  * bits, and the high order bits may be junk.
  */
-int64_t
+pcc_t
 nano_time_rpcc(tsp)
 	struct timespec *tsp;	/* nanosecond clock */
 {
@@ -229,17 +228,29 @@ micro_time(tv)
  * interpolate the nanoseconds since the last call of this routine. Note
  * that we assume the kernel variables have been zeroed early in life.
  */
+
 void
 microset()
 {
-	struct timespec t, u;		/* nanosecond time */
-	int64_t pcc, numer, denom;	/* 64-bit temporaries */
-	int i, s;
-
-	i = cpu_number();		/* read the time on this CPU */
+struct timespec t;
+int	            s;
+pcc_t           pcc;
 	s = splextreme();
 	pcc = nano_time_rpcc(&t);
 	splx(s);
+	microset_from_saved(pcc, &t);
+}
+
+void
+microset_from_saved(pcc_t saved_pcc, struct timespec *pt)
+{
+	struct timespec u;		/* nanosecond time */
+	int64_t pcc, numer, denom;	/* 64-bit temporaries */
+	int i;
+
+	i = cpu_number();		/* read the time on this CPU */
+
+	pcc = saved_pcc & ((1LL << PCC_WIDTH) - 1);
 
 	/*
 	 * Intialize for first reading. Use the processor rate from the
@@ -249,7 +260,7 @@ microset()
 		microset_flag[i]++;
 		pcc_pcc[i] = pcc;
 		pcc_master[i] = master_pcc;
-		pcc_time[i] = t;
+		pcc_time[i] = *pt;
 		pcc_numer[i] = NANOSECOND;
 		pcc_denom[i] = CPU_CLOCK; 
 		return;
@@ -260,8 +271,8 @@ microset()
 	 * ignore it. Things will get well on the next call.
 	 */
 	u = pcc_time[i];
-	pcc_time[i] = t;
-	numer = (t.tv_sec - u.tv_sec) * NANOSECOND + t.tv_nsec -
+	pcc_time[i] = *pt;
+	numer = (pt->tv_sec - u.tv_sec) * NANOSECOND + pt->tv_nsec -
 	    u.tv_nsec; 
 	denom = pcc - pcc_pcc[i];
 	pcc_pcc[i] = pcc;
