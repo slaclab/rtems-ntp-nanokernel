@@ -580,6 +580,9 @@ struct timespec       initime;
 	ntp_init();
 	ntp_adjtime(&ntv);
 
+	fprintf(stderr,"Trying to contact NTP server; (timeout ~1min.)... ");
+	fflush(stderr);
+
 #ifdef USE_PICTIMER
 	if ( pictimerInstallClock( TIMER_NO ) ) {
 		return -1;
@@ -587,14 +590,21 @@ struct timespec       initime;
 #endif
 
 	/* initialize time */
-	if ( 0 == rtems_bsdnet_get_ntp(-1, 0, &initime) ) {
-#ifdef NTP_NANO
-		TIMEVAR = initime;
-#else
-		TIMEVAR.tv_sec  = initime.tv_sec;
-		TIMEVAR.tv_usec = initime.tv_nsec/1000;
+	if ( rtems_bsdnet_get_ntp(-1, 0, &initime) ) {
+		fprintf(stderr,"FAILED: check networking setup and try again\n");
+#ifdef USE_PICTIMER
+		pictimerCleanup(TIMER_NO);
 #endif
+		return -1;
 	}
+	fprintf(stderr,"OK\n");
+
+#ifdef NTP_NANO
+	TIMEVAR = initime;
+#else
+	TIMEVAR.tv_sec  = initime.tv_sec;
+	TIMEVAR.tv_usec = initime.tv_nsec/1000;
+#endif
 
 	if ( RTEMS_SUCCESSFUL != rtems_semaphore_create(
 								rtems_build_name('N','T','P','m'),
