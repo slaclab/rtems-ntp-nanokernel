@@ -106,22 +106,12 @@ endif
 
 ${RTEMS_SITE_INSTALLDIR}/include \
 ${RTEMS_SITE_INSTALLDIR}/lib \
-${RTEMS_SITE_INSTALLDIR}/bin \
-${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/include \
-${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/lib \
-${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/bin :
+${RTEMS_SITE_INSTALLDIR}/bin:
 	test -d $@ || mkdir -p $@
 
 # Install the program(s), appending _g or _p as appropriate.
 # for include files, just use $(INSTALL_CHANGE)
 #
-# NOTES:
-#  - BSP specific applications, headers etc. should be installed to 
-#          $RTEMS_SITE_INSTALLDIR)/$(RTEMS_BSP)/bin
-#
-#  - Some BSPs might generate bootable executables in yet another
-#    format (such as .srec) and you might need to extend the rule
-#    below so the essential files get installed. YMMV.
 install:  all $(RTEMS_SITE_INSTALLDIR)/bin
 	$(INSTALL_VARIANT) -m 555 ${PGMS} ${PGMS:%.exe=%.bin} ${PGMS:%.exe=%.sym} ${RTEMS_SITE_INSTALLDIR}/bin
 	$(INSTALL_CHANGE) -m 444 ${INST_HEADERS} ${RTEMS_SITE_INSTALLDIR}/include
