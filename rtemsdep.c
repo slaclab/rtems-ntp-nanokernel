@@ -1,3 +1,10 @@
+/* $Id$ */
+
+
+/* RTEMS support for Dave Mill's ktime and a very simple NTP synchronization daemon */
+
+/* Author: Till Straumann <strauman@slac.stanford.edu>, 2004 */
+
 #include <rtems.h>
 #include <bsp.h>
 #include <bsp/bspExt.h>
@@ -19,9 +26,17 @@
 #include "pictimer.h"
 #endif
 
-#define NTP_DEBUG
 
-#define DAEMON_SYNC_INTERVAL_SECS	1
+/* =========== CONFIG PARAMETERS ===================== */
+
+#define NTP_DEBUG (NTP_DEBUG_FILTER)
+/* define to OR or the following: */
+#define		NTP_DEBUG_PACKSTATS     1   /* gather NTP packet timing info */
+#define		NTP_DEBUG_MISC          2   /* misc utils (beware of symbol clashes) */
+#define     NTP_DEBUG_FILTER		4   /* print info about trivial filtering algorithm */
+
+#define DAEMON_SYNC_INTERVAL_SECS	1	/* default sync interval */
+
 #define KILL_DAEMON					RTEMS_EVENT_1
 
 #ifdef USE_PICTIMER
@@ -32,6 +47,14 @@
 
 #define PPM_SCALE					(1<<16)
 #define PPM_SCALED					((double)PPM_SCALE)
+
+
+/* =========== PUBLIC GLOBALS ======================== */
+volatile unsigned      rtems_ntp_debug = 1;
+volatile unsigned      rtems_ntp_daemon_sync_interval_secs = DAEMON_SYNC_INTERVAL_SECS;
+FILE		  		   *rtems_ntp_debug_file;
+
+/* =========== GLOBAL VARIABLES ====================== */
 
 #ifdef NTP_NANO
 struct timespec TIMEVAR;	/* kernel nanosecond clock */
@@ -53,17 +76,7 @@ static volatile int tickerRunning = 0;
 static rtems_id sysclk_irq_id = 0;
 #endif
 
-volatile unsigned      rtems_ntp_debug = 1;
-volatile unsigned      rtems_ntp_daemon_sync_interval_secs = DAEMON_SYNC_INTERVAL_SECS;
-FILE		  		   *rtems_ntp_debug_file;
-
-int
-splx(int level)
-{
-	if ( level )
-		rtems_semaphore_release( mutex_id );
-	return 0;
-}
+/* Mutex Primitives (compat with ktime.c / micro.c) */
 
 int
 splclock()
@@ -71,6 +84,15 @@ splclock()
 	rtems_semaphore_obtain( mutex_id, RTEMS_WAIT, RTEMS_NO_TIMEOUT );
 	return 1;
 }
+
+int
+splx(int level)
+{
+	if ( level )	/* this test exists, so splclock() can be e.g., #define 0 */
+		rtems_semaphore_release( mutex_id );
+	return 0;
+}
+
 
 /*
  * RTEMS base: 1988, January 1
@@ -81,7 +103,7 @@ splclock()
 
 #define PARANOIA(something)	assert( RTEMS_SUCCESSFUL == (something) )
 
-#ifdef NTP_DEBUG
+#if NTP_DEBUG & NTP_DEBUG_PACKSTATS
 long long rtems_ntp_max_t1;
 long long rtems_ntp_max_t2;
 long long rtems_ntp_max_t3;
@@ -122,13 +144,6 @@ int s;
 	splx(s);
 }
 
-static int copyPacketCb(struct ntpPacketSmall *p, int state, void *usr_data)
-{
-	if ( 0 == state )
-		memcpy(usr_data, p, sizeof(*p));
-	return 0;
-}
-
 static inline long long nts2ll(struct timestamp *pt)
 {
 	return (((long long)ntohl(pt->integer))<<32) + (unsigned long)ntohl(pt->fraction);
@@ -154,16 +169,17 @@ long rval = f>>32;
 	return rval < 0 ? rval + 1 : rval;
 }
 
-static void pp(struct timestamp *p)
-{
-	printf("%i.%i\n",p->integer,p->fraction);
-}
+typedef struct DiffTimeCbData_ {
+	long long		diff;
+	unsigned long	tripns;
+} DiffTimeCbDataRec, *DiffTimeCbData;
 
 static int diffTimeCb(struct ntpPacketSmall *p, int state, void *usr_data)
 {
+DiffTimeCbData	udat = usr_data;
 struct timespec nowts;
 long long       now, diff, org, rcv;
-#if defined(NTP_DEBUG) && defined(__PPC__)
+#if (NTP_DEBUG & NTP_DEBUG_PACKSTATS) && defined(__PPC__)
 static long		tbthen;
 long			tbnow;
 #endif
@@ -177,7 +193,7 @@ long			tbnow;
 			/* first pass; record our current time */
 			p->transmit_timestamp.integer  = htonl( nowts.tv_sec );
 			p->transmit_timestamp.fraction = htonl( (unsigned long)now ); 
-#if defined(NTP_DEBUG) && defined(__PPC__)
+#if (NTP_DEBUG & NTP_DEBUG_PACKSTATS) && defined(__PPC__)
 			asm volatile("mftb %0":"=r"(tbthen));
 #endif
 		} else {
@@ -188,9 +204,12 @@ long			tbnow;
 				/* correct for delays */
 				diff += (rcv - org);
 				diff >>=1;
+				udat->tripns = frac2nsec(now-org);
+			} else {
+				udat->tripns = 0;
 			}
-			*(long long*)usr_data = diff;
-#ifdef NTP_DEBUG
+			udat->diff = diff;
+#if (NTP_DEBUG & NTP_DEBUG_PACKSTATS)
 			if ( llabs(diff) > llabs(rtems_ntp_max_diff) ) {
 				asm volatile("mftb %0":"=r"(tbnow));
 				rtems_ntp_max_t1 = org;
@@ -207,7 +226,7 @@ long			tbnow;
 	return 0;
 }
 
-#ifdef NTP_DEBUG
+#if (NTP_DEBUG & NTP_DEBUG_PACKSTATS)
 static inline void ufrac2ts(unsigned long long f, struct timespec *pts)
 {
 	pts->tv_sec = f>>32;
@@ -251,15 +270,29 @@ struct timespec ts;
 }
 #endif
 
+#if NTP_DEBUG & NTP_DEBUG_MORE
+static void printNtpTimestamp(struct timestamp *p)
+{
+	printf("%i.%i\n",p->integer,p->fraction);
+}
+
 unsigned
 ntpdiff()
 {
-long long diff;
-	if ( 0 == rtems_bsdnet_get_ntp(-1,diffTimeCb, &diff) ) {
-		printf("%lli; %lis; %lins\n",diff, int2sec(diff), frac2nsec(diff));
-		printf("%lli; %lis; %lins\n",-diff, -int2sec(-diff), -frac2nsec(-diff));
+DiffTimeCbDataRec d;
+	if ( 0 == rtems_bsdnet_get_ntp(-1,diffTimeCb, &d) ) {
+		printf("%lli; %lis; %lins\n",d.diff, int2sec(d.diff), frac2nsec(d.diff));
+		printf("%lli; %lis; %lins\n",-d.diff, -int2sec(-d.diff), -frac2nsec(-d.diff));
+		printf("total roundtrip time was %luns\n", d.tripns);
 	}
 	return (unsigned)diff;
+}
+
+static int copyPacketCb(struct ntpPacketSmall *p, int state, void *usr_data)
+{
+	if ( 0 == state )
+		memcpy(usr_data, p, sizeof(*p));
+	return 0;
 }
 
 unsigned
@@ -267,6 +300,7 @@ ntppack(void *p)
 {
 	return rtems_bsdnet_get_ntp(-1,copyPacketCb,p);
 }
+#endif
 
 static unsigned
 secs2tcld(int secs)
@@ -277,6 +311,27 @@ unsigned rval,probe;
 	return rval;
 }
 
+static int
+acceptFiltered(unsigned long delay)
+{
+static unsigned long avgDelay = 0;
+int rval;
+
+	if ( 0 == avgDelay ) {
+		avgDelay = delay;
+		return 1;
+	}
+
+	rval = delay < avgDelay;
+
+	/* avgDelay/delay = .5/(1-.75z) */
+	avgDelay = ((3*avgDelay) >> 2) + (delay >> 1);
+#if NTP_DEBUG & NTP_DEBUG_FILTER
+	printf("Filter: delay %lu, 2*avg %lu %s\n", delay, avgDelay, rval ? "PASS":"DROP");
+#endif
+	return rval;
+}
+
 static rtems_task
 ntpDaemon(rtems_task_argument unused)
 {
@@ -284,7 +339,8 @@ rtems_status_code     rc;
 rtems_interval        rate;
 rtems_event_set       got;
 long                  nsecs;
-int                   pollsecs = 0;
+int                   pollsecs = 0, retry;
+DiffTimeCbDataRec     d;
 
 	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
 
@@ -296,29 +352,37 @@ goto firsttime;
 									RTEMS_WAIT | RTEMS_EVENT_ANY,
 									rate * pollsecs,
 									&got )) ) {
-		long long diff;
-		if ( 0 == rtems_bsdnet_get_ntp(-1, diffTimeCb, &diff) ) {
-			if ( diff > nsec2frac(MAXPHASE) )
+		for ( retry = 0; retry < 3; retry++  ) {
+
+			/* try a request but drop answers with excessive roundtrip time */
+			if ( 0 != rtems_bsdnet_get_ntp(-1, diffTimeCb, &d) || 
+			     !acceptFiltered(d.tripns) )
+				continue;
+			
+		
+			if ( d.diff > nsec2frac(MAXPHASE) )
 				nsecs =  MAXPHASE;
-			else if ( diff < -nsec2frac(MAXPHASE) )
+			else if ( d.diff < -nsec2frac(MAXPHASE) )
 				nsecs = -MAXPHASE;
 			else
-				nsecs = frac2nsec(diff);
+				nsecs = frac2nsec(d.diff);
 
-#ifdef PROFILER
+#ifndef USE_PROFILER
 			locked_hardupdate( nsecs ); 
 
 			if ( rtems_ntp_debug ) {
 				if ( rtems_ntp_debug_file ) {
 					/* log difference in microseconds */
-					fprintf(rtems_ntp_debug_file,"%.5g\n", 1000000.*(double)diff/4./(double)(1<<30));
+					fprintf(rtems_ntp_debug_file,"%.5g\n", 1000000.*(double)d.diff/4./(double)(1<<30));
 					fflush(rtems_ntp_debug_file);
 				} else {
-					long secs = int2sec(diff);
+					long secs = int2sec(d.diff);
 					printf("Update diff %li %sseconds\n", secs ? secs : nsecs, secs ? "" : "nano");
 				}
 			}
 #endif
+			break;
+
 		}
 
 firsttime:
@@ -348,10 +412,13 @@ static struct timespec	nanobase;
 static struct timeval	nanobase;
 #endif
 
+unsigned long long lasttime = 0;
+
 long
 nano_time(struct timespec *tp)
 {
-unsigned long long pccl;
+
+unsigned long long pccl, thistime;
 
 	pccl = getPcc();
 
@@ -366,14 +433,21 @@ unsigned long long pccl;
 	if ( pcc_denominator ) {
 		pccl *= pcc_numerator;
 		pccl /= pcc_denominator;
+		
+		thistime  = (unsigned long)tp->tv_sec;
+		thistime  = thistime * NANOSECOND + tp->tv_nsec + pccl;
 
-		tp->tv_sec  += pccl / NANOSECOND;
-		tp->tv_nsec += pccl % NANOSECOND;
+		/* prevent the clock from running backwards
+		 * (small backjumps may appear if a clock tick
+		 * adjustment is smaller than what the last nanoclock
+		 * prediction was...)
+		 */
+		if ( thistime <= lasttime )
+			thistime = lasttime + 1;
+		lasttime = thistime;
 
-		if ( tp->tv_nsec >= NANOSECOND ) {
-			tp->tv_nsec -= NANOSECOND;
-			tp->tv_sec++;
-		}
+		tp->tv_sec  = thistime / NANOSECOND;
+		tp->tv_nsec = thistime % NANOSECOND;
 	}
 
 	return 0;
@@ -557,7 +631,9 @@ struct timespec       initime;
 	/* start timer */
 	pictimerEnable(TIMER_NO, 1);
 #endif
+#ifdef USE_PROFILER
 	pictimerProfileInstall();
+#endif
 }
 
 int
@@ -604,7 +680,11 @@ _cexpModuleFinalize(void *handle)
 
 	if ( mutex_id )
 		PARANOIA( rtems_semaphore_delete( mutex_id ) );
+#ifdef USE_PROFILER
 	return pictimerProfileCleanup();
+#else
+	return 0;
+#endif
 }
 
 #ifdef NTP_NANO

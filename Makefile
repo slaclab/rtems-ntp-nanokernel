@@ -24,6 +24,7 @@ CC_FILES=$(CC_PIECES:%=%.cc)
 CC_O_FILES=$(CC_PIECES:%=${ARCH}/%.o)
 
 H_FILES=
+INST_HEADERS=timex.h
 
 # Assembly source names, if any, go here -- minus the .S
 S_PIECES=
@@ -123,3 +124,4 @@ ${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/bin :
 #    below so the essential files get installed. YMMV.
 install:  all $(RTEMS_SITE_INSTALLDIR)/bin
 	$(INSTALL_VARIANT) -m 555 ${PGMS} ${PGMS:%.exe=%.bin} ${PGMS:%.exe=%.sym} ${RTEMS_SITE_INSTALLDIR}/bin
+	$(INSTALL_CHANGE) -m 444 ${INST_HEADERS} ${RTEMS_SITE_INSTALLDIR}/include

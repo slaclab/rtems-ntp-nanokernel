@@ -2,6 +2,7 @@
 #define NTP_PCC_HEADER_H
 
 /* there might be mild dependencies on sizeof(pcc_t) being >= sizeof(long) */
+
 #define PCC_WIDTH 32
 typedef unsigned long pcc_t;
 
@@ -18,9 +19,21 @@ typedef unsigned long pcc_t;
  *    At each interrupt, the ISR saves the PCC to a global variable.
  *    It is essential to minimize jitter of this reading with
  *    respect to interrupt time. Therefore, reading PCC should
- *    be performed ASAP.
+ *    be performed ASAP in the clock ISR.
+ *
+ * Then there is method C) which means that there is no
+ * high resolution clock support at all. The kernel clock
+ * just has a 'tick'-level resolution but is nevertheless
+ * synchronized to NTP.
  *
  */
+
+#ifdef USE_NO_HIGH_RESOLUTION_CLOCK
+
+static inline pcc_t getPcc() 		{ return 0; }
+static inline pcc_t setPccBase() 	{ return 0; }
+
+#else
 
 #ifdef __PPC__
 
@@ -117,5 +130,7 @@ extern pcc_t setPccBase();
 extern pcc_t getPcc();
 extern pcc_t setPccBase();
 #endif
+
+#endif /* ifdef USE_NO_HIGH_RESOLUTION_CLOCK */
 
 #endif
