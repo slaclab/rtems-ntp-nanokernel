@@ -1,0 +1,32 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+
+    <head>
+        <title>Implementation Notes</title>
+        <link href="scripts/style.css" type="text/css" rel="stylesheet">
+    </head>
+
+    <body>
+        <h3>Implementation Notes</h3>
+        <hr>
+        <p>Implementation of the nanokernel modifications involves two steps. The first is to verify the new kernel tick interrupt and PPS interrupt source code is compatible with the particular machine architecture, operating system and compiler. The <tt>kern</tt> simulator program is designed to do this using the actual kernel code fragments in both 32-and 64-bit architectures and with both microsecond and nanosecond kernel time variables. See the <tt>kern.h</tt>, <tt>timex.h</tt> and <tt>l_fp.h</tt> header files, the <tt>NANO</tt> and <tt>L64</tt> defines, and accompanying commentary. See the description of the <tt>kern</tt> simulator program for directions on its use. Use the <tt>test.sh</tt> script to compile and test the simulator. This script uses the gcc compiler, but an ordinary cc compiler should work as well. Use the <tt>kern.dat</tt> script to simulate and test the code fragments throughout the complete operational envelope.</p>
+        <p>The second step is to extract the relevant code fragments from the <tt>ktime.c</tt> and <tt>micro.c</tt> source files and insert in the kernel source code. The <tt>ktime.c</tt> file in most cases can be used almost as-is, with linkages established from the BSD <tt>hardclock()</tt> routine or equivalent to service the tick interrupt and to the kernel routine to read the system clock and interpolate the nanoseconds or microseconds. The <tt>ntp_tick_adjust()</tt> routine replaces the code that increments the system clock by the tick interval, while the <tt>second_overflow()</tt> routine is called just after the test for seconds overflow. Typical modifications in this code are to the various copy-in and copy-out interfaces, set-priority calls and return codes.</p>
+        <p>Each architecture may have a different method to read the system clock as an atomic operation and to interpolate the nanoseconds or microseconds. The routines in the <tt>micro.c</tt> source file serve as typical examples, but these work only in 64-bit architectures. In the case of symmetric multiprocessor (SMP) systems, the implementation involves a special interprocessor interrupt about once per second for each processor, in order to calibrate the nanosecond interpolation and establish a base time and oscillator rate. The interrupt should be initiated from the tick interrupt routine after the routines in the <tt>ktime.c</tt> source file. From experience, this code is extremely delicate and requires very careful consideration for overflows, etc., that can happen in various places. The <tt>micro.c</tt> code was tested thoroughly in simulation, during which several oversights and undersights were found and corrected. See the commentary for specific considerations.</p>
+        <p>The PPS signal interfacing issues are beyond the scope of this discussion; however, the prudent course would be to modify the hardware driver to capture transitions of a modem control lead such as DCD and call the <tt>nano_time_rpcc()</tt> routine in <tt>micro.c</tt>, then pass the results on to <tt>hardpps()</tt> in <tt>ktime.c</tt>. Following is a code snip showing how this can be done:</p>
+        <pre>
+        struct timespec pps_time;
+        long nsec;
+
+        if (!edge)
+                return;
+        nsec = nano_time_rpcc(&amp;pps_time);
+        hardpps(&amp;pps_time, nsec);
+</pre>
+        <p>One of the things to watch for in this code is the possibility that a modem control lead interrupt can in some architectures preempt a timer interrupt. The problem occurs when the modem interrupt and call to <tt>hardpps()</tt> occurs before the <tt>ntp_tick_adjust()</tt> routine is called from <tt>hardclock()</tt>. While the <tt>hardpps()</tt> routine has been coded with this possibility in mind, it helps to move the <tt>ntp_tick_adjust()</tt> call as early in the <tt>hardclock()</tt> routine as possible.</p>
+        <p>Stay tuned for an IETF application program interface document on PPS API.</p>
+        <hr>
+        <script type="text/javascript" language="javascript" src="scripts/footer.txt"></script>
+    </body>
+
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+
+    <head>
+        <title>Utility Programs</title>
+        <link href="scripts/style.css" type="text/css" rel="stylesheet">
+    </head>
+
+    <body>
+        <h3>Utility Programs</h3>
+        <h4>Table of Contents</h4>
+        <ul>
+            <li class="inline"><a href="#sim">Simulator Program</a>
+            <li class="inline"><a href="#hist">Histogram Program</a>
+        </ul>
+        <hr>
+        <h4 id="#sim">Simulator Program</h4>
+        <p>The <tt>kern.c</tt> simulator program linked with the <tt>ktime.c</tt> and <tt>micro.c</tt> subroutines in the distribution can be used to run a validation test suite in order to confirm that the kernel modifications work correctly in a particular architecture. The simulator can initialize state variables from the command line and write the feedback loop impulse response to the standard output. Alternately, the simulator can read input phase offset values from a data file and write the response to the standard output. See the source and header files for further details. Following is a list of command line flags interpreted by the program.</p>
+        <table width="100%" cellspacing="0">
+            <tr>
+                <td align="left" width="20%"><b>Option</b></td>
+                <td align="left"><b>Description</b></td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>a</tt></td>
+                <td align="left">use alternate output format</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>c</tt></td>
+                <td align="left">specify PPS mode and averaging time (shift)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>d</tt></td>
+                <td align="left">specify debug mode (trace on every tick/PPS interrupt</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>f <i>frequency</i></tt></td>
+                <td align="left">specify initial frequency transient (PPM)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>F <i>file</i></tt></td>
+                <td align="left">specify file name for data input</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>l <i>poll</i></tt></td>
+                <td align="left">specify FLL mode and interval between polls (shift)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>m <i>min</i></tt></td>
+                <td align="left">specify minimum simulation time (s) for trace</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>p <i>usec</i></tt></td>
+                <td align="left">specify initial phase transient (<font face="symbol">m</font>s)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>r <i>random</i></tt></td>
+                <td align="left">specify random walk frequency parameter</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>s <i>run</i></tt></td>
+                <td align="left">specify maximum simulation time (s)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>t <i>tc</i></tt></td>
+                <td align="left">specify PLL mode and time constant (shift)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>w <i>hex</i></tt></td>
+                <td align="left">specify status word (not used here)</td>
+            </tr>
+            <tr>
+                <td align="left" width="20%"><tt>z <i>hz</i></tt></td>
+                <td align="left">specify tick interrupt frequency (Hz)</td>
+            </tr>
+        </table>
+        <p>In use, the <tt>kern.sh</tt> script should be run and the output compared with the model <tt>kern.out</tt> file in the distribution. Following is an example of the normal output format produced by the simulator.</p>
+        <pre>
+start 0 s, stop 4000 s
+state 0, status 2001, poll 64 s, phase 1000 us, freq 0 PPM
+hz = 100 Hz, tick 10000000 ns
+
+time offset   freq  _offset          _freq            _adj
+0    1000.000 0.000 000f424000000000 0000000000000000 3b9aca0000000000
+...
+</pre>
+        <p>The program generates trace data lines in the format</p>
+        <p><tt>time offset frequency hex_offset hex_frequency hex_adjustment</tt></p>
+        <p>The first three fields are the simulation time in seconds, phase error in microseconds and frequency error in PPM in decimal, and the last three fields are the corresponding <tt>time_offset</tt>, <tt>time_freq</tt> and <tt>time_adj</tt> state variables of the clock discipline loop in hexadecimal. In comparing the output of one architecture with another, minor differences may occur in the least significant digits. This is due to minor differences in input and output conversion routines, roundoff error, etc., and should not be considered significant.</p>
+        <p>An alternate output file format can be selected with the <tt>-a</tt> command line switch. This format consists of three fields corresponding to the first three fields of the standard format and in the same units. This format is intended for analysis and display programs like Matlab. In this format no header lines are produced.</p>
+        <p>As an alternative to producing the impulse response of the feedback loop, an input data file can be specified using the <tt>-F</tt> command line option. The input file format consists of one update per line, where each line consists of two fields, the observation time in seconds and the phase offset in microseconds.</p>
+        <h4 id="#hist">Histogram Program</h4>
+        <p>The <tt>jitter.c</tt> program in the distribution can be used to generate a histogram of execution times for the ntp_gettime() system call, which involves a call on the nano_time() routine, an example of which is in kern.c. This is useful to determine the expected running time, as well as to look for anomalies, such as monotonic violations, etc. When operating properly, the histogram should show a sharp peak about 50 <font face="symbol">m</font>s for a Sun IPC, 20 <font face="symbol">m</font>s for a DEC 5000/240, 10 <font face="symbol">m</font>s for a DEC 3000 Alpha, 8 <font face="symbol">m</font>s for a HP 9000/735 and 2 <font face="symbol">m</font>s for a Digital 433au. There should be no samples much below the peak; if samples of 1 <font face="symbol">m</font>s or less are found (the silly thing coredumps if less than zero), there is probably a bug in the implementation or the local clock has been set backward when the <tt>ntpd</tt> daemon is running while the program is running.</p>
+        <hr>
+        <script type="text/javascript" language="javascript" src="scripts/footer.txt"></script>
+    </body>
+
+</html>

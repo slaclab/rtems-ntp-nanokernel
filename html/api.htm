@@ -1,0 +1,187 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+
+    <head>
+        <title>Kernel Application Program Interface</title>
+        <link href="scripts/style.css" type="text/css" rel="stylesheet">
+    </head>
+
+    <body>
+        <h3>Kernel Application Program Interface</h3>
+        <h4>Table of Contents</h4>
+        <ul>
+            <li class="inline"><a href="#intro">Introduction</a><br>
+            <li class="inline"><a href="#status">Status Word</a><br>
+            <li class="inline"><a href="#leap">Return Codes and the Leap-Second State Machine</a><br>
+            <li class="inline"><a href="#mode">Mode Control Bits</a><br>
+            <li class="inline"><a href="#adjtime">The <tt>ntp_adjtime()</tt> System Call</a><br>
+            <li class="inline"><a href="#gettime">The <tt>ntp_gettime()</tt> System Call</a><br>
+            
+        </ul>
+        <hr>
+        <h4 id="#intro">Introduction</h4>
+        <p>The kernel application program interface (API) is used by the NTP protocol daemon (or equivalent) to discipline the system clock and set various parameters necessary for its correct operation. The API is used by application programs to read the system clock and determine its health and expected error values. Following is a description of the interface, as well as the control and monitoring variables involved.</p>
+        <p>The API consists of two Unix system calls, <tt>ntp_gettime()</tt> and <tt>ntp_adjtime()</tt>. The <tt>ntp_gettime()</tt> call returns the current system time in either <tt>timespec</tt> format in seconds and nanooseconds, or <tt>timeval</tt> format in seconds and microseconds, as determined by the particular operating system. In addition to the time value, this system call returns variables representing the maximum credible error and estimated error of the time value in microseconds and the current offset of International Atomic Time (TAI) relative to Universal Coordinated Time (UTC) when available. The <tt>ntp_adjtime()</tt> call is used to set and read certain kernel state variables according to a set of mode bits in the call. To set the variables requires superuser permission, but to read them requires no special permissions. Both system calls return a code indicating the current status of the system clock; that is, whether a leap second is pending or whether the clock is synchronized to a working reference source.</p>
+        <p>Following is a description of the various values used by the API, including state variables and control/status bits. Detailed calling sequences and structure definitions are in the <tt>timex.h</tt> header file included in the distribution.</p>
+        <h4 id="#arch">Architecture Constants</h4>
+        <p>The following parameters defined in the <tt>timex.h</tt> header file establish the performance envelope of the kernel clock discipline loop. Included are the current values for these parameters, although they may be changed in future. Note that changing these values may adversely affect overflow and rounding behavior and require re-engineering of the code segments.</p>
+        <dl>
+            <dt><tt>MAXPHASE</tt><br>
+                <tt>MAXFREQ</tt>
+            <dd>Phase errors greater than <tt>MAXPHASE</tt> (0.5 s) or frequency errors greater than <tt>MAXFREQ</tt> (500 PPM) are beyond the range of the clock discipline algorithm. Values that exceed these limits are clamped to the limits before being used to discipline the system clock.
+            <dt><tt>MINSEC</tt><br>
+                <tt>MAXSEC</tt>
+            <dd>For update intervals less than <tt>MINSEC</tt> (256 s), the clock discipline algorithm always operates in PLL mode; while, for update intervals more than <tt>MAXSEC</tt> (2048 s), the algorithm always operates in FLL mode. Between these two limits the mode is selected by the <tt>STA_FLL</tt> bit in the status word.
+            <dt><tt>MAXTC</tt>
+            <dd>The range of time constants supported by the clock discipline algorithm is limited to the range 0 through <tt>MAXTC</tt> (10). The time constant is expressed as a power of two, so that zero corresponds to 1 s and 10 corresponds to 1024 s.
+        </dl>
+        <h4 id="#status">Status Word</h4>
+        <p>The various functions of the clock discipline algorithm are controlled and monitored by the status word. The bits of this word are read and written using the <tt>ntp_adjtime()</tt> system call, but superuser privilege is required to write them. The following read/write bits are defined by the API.</p>
+        <dl>
+            <dt><tt>STA_PLL</tt>
+            <dd>Master enable switch for the PLL/FLL loop. The algorithm is responsive to time and/or frequency updates if set; otherwise, no change in the current time or frequency will be made other than to complete a pending phase adjustment. This bit does not affect the PPS loop.
+            <dt><tt>STA_PPSFREQ</tt>
+            <dd>Enables the PPS frequency discipline independent of the <tt>STA_PLL</tt> bit.
+            <dt><tt>STA_PPSTIME</tt>
+            <dd>Enables the PPS phase discipline independent of the <tt>STA_PLL</tt> bit.
+            <dt><tt>STA_FLL</tt>
+            <dd>Selects the operating mode when the time constant is in the range 0 through 10. If set, operation is in FLL mode; otherwise, operation is in PLL mode.
+            <dt><tt>STA_INS</tt><br>
+                <tt>STA_DEL</tt>
+            <dd>Controls the system clock behavior in the vicinity of a leap second insertion or deletion. See the <a href="#leap">Return Codes and the Leap-Second State Machine</a> section on this page for how these bits are used.
+            <dt><tt>STA_UNSYNC</tt>
+            <dd>Set by the synchronization daemon to indicate an unsynchronized or out-of-tolerance condition, but otherwise has no effect on the clock discipline algorithm.
+            <dt><tt>STA_FREQHOLD</tt>
+            <dd>Set by the synchronization daemon to freeze the current frequency while allowing the phase to be disciplined as usual. This bit is not used by the NTP Version 4 daemon and is included only for legacy purposes.
+        </dl>
+        <p>The following read-only status bits are defined by the API.</p>
+        <dl>
+            <dt><tt>STA_PPSSIGNAL</tt>
+            <dd>Indicates the presence of a valid PPS signal. It is set by a valid PPS update and reset about two minutes during which no signal is present.
+            <dt><tt>STA_PPSJITTER</tt>
+            <dd>Indicates a condition of excessive PPS phase jitter. See the <a href="descrip.htm">Principles of Operation</a> for further details.
+            <dt><tt>STA_PPSWANDER</tt>
+            <dd>Indicates a condition of excessive PPS frequency wander. See the <a href="descrip.htm">Principles of Operation</a> page for further details.
+            <dt><tt>STA_PPSERROR</tt>
+            <dd>Indicates a calibration error in the PPS frequency measurement algorithm. See the <a href="descrip.htm">Principles of Operation</a> page for further details.
+            <dt><tt>STA_CLOCKERR</tt>
+            <dd>Set by the external clock driver to indicate a fault in the hardware or driver.
+            <dt><tt>STA_NANO</tt>
+            <dd>Set to indicate nanosecond mode or reset to indicate microsecond mode. See the <tt>MOD_NANO</tt> and <tt>MOD_MICRO</tt> mode control bits for further information.
+            <dt><tt>STA_MODE</tt>
+            <dd>Set by the kernel to indicate FLL mode is in effect. FLL mode is in effect if the interval since the last update is greater than <tt>MAXSEC</tt> or if the interval since the last update is greater than <tt>MINSEC</tt> and the <tt>STA_FLL</tt> bit is set in the status word.
+            <dt><tt>STA_CLK</tt>
+            <dd>Set to indicate the external clock is in use or reset to indicate the normal kernel clock variable is in use. See the <tt>MOD_CLKA</tt> and <tt>MOD_CLKB</tt> mode control bits for further information.
+        </dl>
+        <h4 id="#leap">Return Codes and the Leap-Second State Machine</h4>
+        <p>Occasionally, it is necessary to adjust the system clock in response to leap seconds as declared by national standards laboratories. The adjustments are in integral seconds that may be inserted or deleted in the local timescale. The mechanism to recognize and disseminate the leap events themselves is beyond the scope of the API.</p>
+        <p>A leap event is implemented using a state machine in the kernel. Normally, the machine is in <tt>TIME_OK</tt> state and nothing special happens at midnight UTC. In order to arm the machine for the event, the <tt>ntp_adjtime()</tt> system call sets the <tt>STA_INS</tt> or <tt>STA_DEL</tt> bit in the status word, which initializes the machine in either <tt>TIME_INS</tt> or <tt>TIME_DEL</tt> state to insert or delete the second, respectively. If in <tt>TIME_INS</tt> after second 86,399 of the day, the machine repeats that second, numbered 86,400 of the current day, and transitions to <tt>TIME_OOP</tt>. One second later it transitions to <tt>TIME_WAIT</tt>. If in <tt>TIME_DEL</tt> after second 86,398 of the current day, it sets the system clock one second in the future, numbered second 0 of the following day, and transitions to <tt>TIME_WAIT</tt>. The machine remains in this state until the <tt>STA_INS</tt> and <tt>STA_DEL</tt> bits are both reset in the status word, after which it transitions to <tt>TIME_OK</tt>.</p>
+        <p>It is extremely important to recognize the assumption in this design that the actual value of the system clock is read by a routine that always requires the system time to appear a monotonic process; that is, never runs backward. During an inserted leap second the system clock will appear to run one unit forward each time it is read, regardless of its prior value. Once the leap second has expired, the clock will resume normal operation. This is not a property of the API itself, but rather an intrinsic property of the system clock reading mechanism.</p>
+        <p>The current state of the machine is determined by the state word maintained by the kernel. When no error conditions are in effect, the value returned by the <tt>ntp_gettime()</tt> and <tt>ntp_adjtime()</tt> system calls is the current value of this word; otherwise, an error value is returned. Specific reasons for the error can be determined from the status word returned by the <tt>ntp_adjtime()</tt> system call. The following return codes are defined by the API.</p>
+        <dl>
+            <dt><tt>TIME_OK</tt>
+            <dd>No leap second warning is in effect.
+            <dt><tt>TIME_INS</tt>
+            <dd>A leap second will be inserted following second 86,400 of the current day.
+            <dt><tt>TIME_DEL</tt>
+            <dd>A leap second will be deleted following second 86,399 of the current day.
+            <dt><tt>TIME_OOP</tt>
+            <dd>A leap second insertion is in progress. Time might not be precisely coordinated between NTP server sites. This state occurs only during the actual leap second insertion and lasts for only one second.
+            <dt><tt>TIME_WAIT</tt>
+            <dd>A leap second insertion has completed, but the leap warning bits <tt>TIME_INS</tt> or <tt>TIME_DEL</tt> remain set.
+            <dt><tt>TIME_ERROR</tt>
+            <dd>The system clock is currently not synchronized to a reliable server. This state is declared when one or more of the following conditions are met.
+            <dl>
+                <dt><tt>STA_UNSYNC</tt> or <tt>STA_CLOCKERR</tt> is set.
+                <dd>Either the clock is not synchronized to a reliable server or a failure has occurred in the external clock or clock driver, if provisioned.
+                <dt><tt>STA_PPSSIGNAL</tt> is reset and either <tt>STA_PPSFREQ</tt> or <tt>STA_PPSTIME</tt> is set).
+                <dd>The synchronization daemon has requested use of the PPS signal, but the signal has not been detected during the last two minutes.
+                <dt><tt>STA_PPSTIME</tt> and <tt>STA_PPSJITTER</tt> are both set.
+                <dd>The synchronization daemon has requested PPS time discipline, but the jitter has exceeded the limit.
+                <dt><tt>STA_PPSFREQ</tt> is set and either <tt>STA_PPSWANDER</tt> or <tt>STA_PPSERROR</tt> is set.
+                <dd>The synchronization daemon has requested PPS frequency discipline, but either the frequency wander has exceeded the limit or a frequency measurement has failed due to a glitch.
+            </dl>
+        </dl>
+        <p>There are two additional return codes which can be produced by the kernel. These include the following system-dependent error numbers defined in the <tt>/usr/include/errno.h</tt> header file. Note that the values of these error numbers may collide with the above return codes in some systems.</p>
+        <dl>
+            <dt><tt>EPERM</tt>
+            <dd>Not superuser - attempt to change kernel variables without root privilege.
+            <dt><tt>EINVAL</tt>
+            <dd>Invalid argument - attempt to set both <tt>MOD_MICRO</tt> and <tt>MOD_NANO</tt> or <tt>MOD_CLKB</tt> and <tt>MOD_CLKA</tt> simultaneously
+        </dl>
+        <h4 id="#mode">Mode Control Bits</h4>
+        <p>The following mode bits specify which kernel values are to be changed in the <tt>ntp_adjtime()</tt> system call, as well as the format used for time values and whether an external clock is selected.</p>
+        <dl>
+            <dt><tt>MOD_OFFSET</tt><br>
+                <tt>MOD_FREQUENCY</tt><br>
+                <tt>MOD_MAXERROR</tt><br>
+                <tt>MOD_ESTERROR</tt><br>
+                <tt>MOD_STATUS</tt><br>
+                <tt>MOD_TIMECONST</tt><br>
+                <tt>MOD_PPSMAX</tt>
+            <dd>These bits control which field of the timex structure are used to update the corresponding kernel variable. The bits may be set in any combination. See the description below for which bits control which variable.
+            <dt><tt>MOD_NANO</tt><br>
+                <tt>MOD_MICRO</tt>
+            <dd>These two bits control the scale used in the API interface (but not the actual operations used by the clock discipline algorithm). Only one of the two bits should be set. <tt>MOD_NANO</tt> selects seconds and nanoseconds (<tt>timespec</tt> format), while <tt>MOD_MICRO</tt> selects seconds and microseconds (timeval format). This applies to both the time value returned by <tt>ntp_gettime()</tt> and the offset used by <tt>ntp_adjtime()</tt>. Note that not all kernels can support nanosecond format. The recommended behavior is to select one or the other format and inspect the <tt>STA_NANO</tt> bit in the status word to determine the actual kernel mode. The default when the kernel is first booted is seconds and microseconds for legacy compatibility.
+            <dt><tt>MOD_CLKA</tt><br>
+                <tt>MOD_CLKB</tt>
+            <dd>These two bits control the operation of an external clock, if present in the architecture. Only one of the two bits should be set. <tt>MOD_CLKB</tt> sets the <tt>STA_CLK</tt> bit in the status word, while the <tt>MOD_CLKA</tt> resets it. The behavior in response to the <tt>STA_CLK</tt> bit is beyond the scope of the current implementation.
+        </dl>
+        <h4 id="#adjtime">The <tt>ntp_adjtime()</tt> System Call</h4>
+        <p>The <tt>ntp_adjtime()</tt> system call is used to set and read kernel variables used by kernel. It operates using the <tt>timex</tt> structure described in the <tt>timex.h</tt> header file. This structure is used both to change the values of certain kernel variables and to return the current values. Root privilege is required to change the values. Following are the variables that can be read and written. The return codes are described in the <a href="#leap">Return Codes and the Leap-Second State Machine</a> section on this page.</p>
+        <dl>
+            <dt><tt>offset</tt>
+            <dd>If the <tt>MOD_OFFSET</tt> bit is set in the mode word, this variable updates the kernel time offset in nanoseconds, if the <tt>STA_NANO</tt> bit is set in the status word, or in microseconds if not.
+            <dt><tt>freq</tt>
+            <dd>If the <tt>MOD_FREQUENCY</tt> bit is set in the mode word, this variable updates the kernel frequency offset. This is ordinarily done only when the clock discipline algorithm is first started, since the frequency is automatically determined by the algorithm after that. The format of this variable is in PPM with a 16-bit fraction field.
+            <dt><tt>maxerror</tt>
+            <dd>If the <tt>MOD_MAXERROR</tt> bit is set in the mode word, this variable updates the kernel maximum error in microseconds. The error is automatically updated by the clock discipline algorithm after that and until the next update. The value is not used for any purpose other than to provide a conduit from the synchronization daemon to the user applications.
+            <dt><tt>esterror</tt>
+            <dd>If the <tt>MOD_ESTERROR</tt> bit is set in the mode word, this variable updates the kernel estimated error in microseconds. The value is not used for any purpose other than to provide a conduit from the synchronization daemon to the user applications.
+            <dt><tt>status</tt>
+            <dd>If the <tt>MOD_STATUS</tt> bit is set in the mode word, this variable updates the read/write bits in the status word.
+            <dt><tt>shift</tt>
+            <dd>This variable is actually two variables, one write-only and the other read-only. When written, the value represents the maximum calibration cycle length expressed in seconds as a power of two. When read, the value represents the current calibration cycle length expressed in seconds as a power of two.
+        </dl>
+        <p>The following variables are read-only.</p>
+        <dl>
+            <dt><tt>precision</tt>
+            <dd>Precision of the system clock, in nanoseconds if the <tt>STA_NANO</tt> bit is set in the status word, or in microseconds if not.
+            <dt><tt>tolerance</tt>
+            <dd>Frequency tolerance of the clock discipline algorithm, in the same units as the <tt>freq</tt> variable described above. More precisely, the maximum clock oscillator frequency error that can be corrected by the clock discipline algorithm.
+        </dl>
+        <p>The following variables are read-only and present only if the PPS clock discipline code has been compiled and configured in the kernel. They are included in the <tt>timex</tt> structure definition to insure portability.</p>
+        <dl>
+            <dt><tt>ppsfreq</tt>
+            <dd>Frequency calculated by the PPS loop, in the same units as the <tt>freq</tt> variable described above. This calculation is independent of all other means to adjust the system clock frequency. If enabled by the API and the PPS signal is within nominals, the clock frequency should be identical to this value.
+            <dt><tt>jitter</tt>
+            <dd>Average phase jitter, in nanoseconds if the <tt>STA_NANO</tt> bit is set in the status word, or in microseconds if not.
+            <dt><tt>stabil</tt>
+            <dd>Average wander, in the same units as the <tt>freq</tt> variable described above.
+            <dt><tt>jitcnt</tt>
+            <dd>Count of excess phase jitter occurrences. See the <a href="descrip.htm">Principles of Operation</a> page for further details.
+            <dt><tt>calcnt</tt>
+            <dd>Count of calibration intervals. See the <a href="descrip.htm">Principles of Operation</a> page for further details.
+            <dt><tt>errcnt</tt>
+            <dd>Count of calibration error occurrences. See the <a href="descrip.htm">Principles of Operation</a> page for further details.
+            <dt><tt>errcnt</tt>
+            <dd>Count of excess frequency wander occurrences. See the <a href="descrip.htm">Principles of Operation</a> page for further details.
+        </dl>
+        <h4 id="#gettime">The <tt>ntp_gettime()</tt> System Call</h4>
+        <p>The <tt>ntp_gettime()</tt> system call is used to read the current system time and related error variables. It uses the <tt>ntptimeval</tt> structure described in the <tt>timex.h</tt> header file. This structure includes the following variables. The return codes are described in the <a href="#leap">Return Codes and the Leap-Second State Machine</a> section on this page.</p>
+        <dl>
+            <dt><tt>time</tt>
+            <dd>Current system clock time, in <tt>timespec</tt> format if <tt>STA_NANO</tt> is set in the status word; in <tt>timeval</tt> format if not.
+            <dt><tt>maxerror</tt>
+            <dd>Maximum credible absolute error of the system clock, in microseconds. The value is initialized by the <tt>ntp_adjtime()</tt> system call and incremented by the kernel after that. The value is not used for any purpose other than to provide a conduit from the synchronization daemon to the user applications.
+            <dt><tt>esterror</tt>
+            <dd>Estimated RMS error of the system clock, in microseconds. The value is initialized by the <tt>ntp_adjtime()</tt> system call, but not used for any purpose other than to provide a conduit from the synchronization daemon to the user applications.
+            <dt><tt>tai</tt>
+            <dd>Current offset of TAI relative to UTC, as provided by the Autokey protocol and the NIST leapseconds file.
+        </dl>
+        <hr>
+        <script type="text/javascript" language="javascript" src="scripts/footer.txt"></script>
+    </body>
+
+</html>

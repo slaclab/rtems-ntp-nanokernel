@@ -1,0 +1,71 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+
+    <head>
+        <title>Proof of Performance</title>
+        <link href="scripts/style.css" type="text/css" rel="stylesheet">
+    </head>
+
+    <body>
+        <h3>Proof of Performance</h3>
+        <h4>Table of Contents</h4>
+        <ul>
+            <li class="inline"><a href="#check">Initial Checks</a>
+            <li class="inline"><a href="#pps">PPS Debugging</a>
+            <li class="inline"><a href="#proof">Proof of Performance</a>
+        </ul>
+        <hr>
+        <h4 id="#check">Initial Checks</h4>
+        <p>It is essential that the modified kernel be thoroughly tested before revenue service, since misbehavior of the system clock can be seriously disruptive in vital areas like archiving, electronic messaging and software building. Proof of performance requires tools found in the software distribution and also the Network Time Protocol distribution, which can be found at <a href="http://www.eecis.udel.edu/~ntp">www.eecis.udel.edu/~ntp</a>. Tools found in this distribution include <tt>jitter.c</tt>, which verifies correct system clock monotonicity, rollover and SMP operation. Tools found in the NTP distribution include the monitoring tools <tt>ntpq</tt> and <tt>ntpdc</tt>, the kernel test tool <tt>ntptime</tt> and the various statistics data files managed by the <tt>filgen</tt> facility.</p>
+        <p>The first thing is to verify the clock works correctly and has no antisocial behavior, such as forward or backward spikes, discontinuities, etc. The <tt>jitter.c</tt> test program in this distribution can be used for this purpose. It can be compiled with gcc or cc for the particular architecture involved. It should be run while the machine is not synchronized to a timing source. The most revealing test is to run two or more copies of the program in separate processes in a SMP system, if available.</p>
+        <p>The program repeatedly calls <tt>ntp_gettime()</tt> to read the system clock and writes the differences between successive readings to the standard output, which can of course be redirected to a data file. It sorts the first 20,000 differences and produces the beginning and ending tails of the resulting histogram to the standard error. A quick inspection of the histogram tails serves as a sanity check for correct operation. The beginning tail should contain only positive nonzero numbers, while the ending tail should not contain significant outlyers. The differences data file can be processed to produce a plot which typically shows subtle bumps at intervals corresponding to context-switches, cache flushes, tick interrupts, etc. For the ultimate test, a Fourier transform of these data should show a substantially flat envelope, demonstrating no significant cyclic phenomena which might create subtle beating effects in phase or frequency.</p>
+        <p>Once jitter testing is complete, the NTP daemon should be started and the machine synchronized to a timing source, such as a remote NTP server. For the best results, a PPS signal should be connected as described elsewhere. The <tt>ntptime</tt> program can be used to monitor the kernel operation. When the daemon first starts, it calls <tt>ntp_adjtime()</tt> to enable the kernel and specify the mode. Note the status word during as the synchronization process proceeds. It starts with a <tt>STA_UNSYNC</tt> (<tt>0x0040</tt>), which indicates unsynchronized. After the daemon starts, the status word should show <tt>STA_UNSYNC</tt> and <tt>STA_PLL</tt> (<tt>0x0041</tt>) for the older microsecond kernels and NTP-4 versions prior to 90c, or <tt>STA_NANO</tt>, <tt>STA_UNSYNC</tt> and <tt>STA_PLL</tt> (<tt>0x2041</tt>) when the kernel has been enabled for nanosecond operation.</p>
+        <p>If a PPS signal is connected, and before the clock is synchronized, the <tt>STA_PPSSIGNAL</tt> status bit should be lit. This indicates the PPS signal is present, but not necessarily working correctly. If the <tt>STA_PPSJITTER</tt> bit is lit, but none of the counters are incrementing, the signal is either excessively noisy or at the wrong frequency. After synchronization is achieved, the daemon should set the <tt>STA_PPSFREQ</tt> bit to enable frequency discipline and the <tt>STA_PPSTIME</tt> bit to enable time discipline. There may be intermediate conditions where one or more of the error bits are set, but these should settle out after a few minutes.</p>
+        <h4 id="#pps">PPS Debugging</h4>
+        <p>Following is a typical billboard produced by the <tt>ntptime</tt> program running on an Alpha. It shows the results first of a <tt>ntp_gettime()</tt> system call, which returns the current time and quality metrics, followed by a <tt>ntp_adjtime()</tt> system call, which returns the current system variables. In this case, the maximum error and estimated error are provided by the NTP daemon, which then are made available to user programs via the system calls. The remaining variables are produced by the kernel.</p>
+        <pre>
+ntp_gettime() returns code 0 (OK)
+  time ba302a94.273a8000  Sun, Dec 27 1998  3:40:04.153, (.478303892),
+  maximum error 5095 us, estimated error 337 us.
+ntp_adjtime() returns code 0 (OK)
+  modes 0x0 (),
+  offset 0.015 us, frequency 1.342 ppm, interval 256 s,
+  maximum error 5095 us, estimated error 337 us,
+  status 0x2107 (PLL,PPSFREQ,PPSTIME,PPSSIGNAL,NANO),
+  time constant 0, precision 0.001 us, tolerance 508 ppm,
+  pps frequency 1.342 ppm, stability 0.018 ppm, jitter 5.260 us,
+  intervals 74, jitter exceeded 145, stability exceeded 6, errors 0.
+</pre>
+        <p>the last two lines of the <tt>ntptime</tt> billboard show the PPS signal quality and error residuals. The most useful error indications are the jitter and stability counters and their associated status bits. The <tt>STA_PPSJITTER</tt> bit is lit and the jitter exceeded counter incremented when a sudden time change over 500 <font face="symbol">m</font>s is detected. The <tt>STA_PPSWANDER</tt> bit is lit and the stability exceeded counter incremented when a sudden frequency change over 10 PPM is detected. The <tt>STA_PPSERROR</tt> bit is lit and the error counter incremented when the PPS discipline is reset. This can occur at reboot, when the daemon is restarted and after a considerable time when no PPS signal is present.</p>
+        <p>If the <tt>STA_PPSJITTER</tt> bit is lit, or the jitter exceeded counter increments continuously, or the jitter value is very large (over 100 <font face="symbol">m</font>s), the PPS signal has excessive jitter and is probably unsuitable as a synchronization source. This might occur if the PPS signal, when converted to RS-232 signal levels, passes over a considerable length of unterminated house wiring. If the <tt>STA_PPSWANDER</tt> status bit is lit, or the stability exceeded counter increments continuously, or the stability value is very large (over 1 PPM), the PPS signal is unstable and probably unsuitable as a synchronization source.</p>
+        <h4 id="#proof">Proof of Performance</h4>
+        <p>The final phase in the proof of performance exercise is to run the discipline for a day or so and collect the NTP <tt>filegen</tt> facility data for <tt>loopstats</tt> and <tt>peerstats</tt> files. Because of the way these data are recorded, the residual phase measurements shown in the <tt>loopstats</tt> file are misleading when the PPS signal is the synchronization source; however, the frequency measurements are accurate. Note that the frequency is updated at intervals shown in the <tt>ntptime</tt> billboard, ultimately 128 s. The frequency may wander throughout the day and night, generally following the ambient temperature, but ordinarily not more than &plusmn;0.1 PPM.</p>
+        <p>Accurate phase measurements can be determined by running <tt>grep</tt> on the <tt>peerstats</tt> file and looking for the string &quot;127.0.0.1&quot;. Normally, and even with a good PPS signal and when the kernel is not operating in nanosecond mode, the residual offsets should only rarely exceed &plusmn;1 <font face="symbol">m</font>s. The best behavior with a good PPS signal and nanosecond kernel mode has not yet been determined, but it should be better than this, perhaps in the tens of nanoseconds.</p>
+        <p>The following plots show typical performance in time and frequency for two architectures, Digital Alpha (<i>churchy.udel.edu</i>) and Sun IPC (<i>grundoon.udel.edu</i>) over a typical day. It is important to remember that the data on these plots is derived from the oscillator control signal <i>V<sub>c</sub></i> of the feedback loop. See the <a href="descrip.htm">Principles of Operation</a> page for further information. A precision PPS signal is connected to each of these machines, but <i>churchy</i> is separated by several hundred feet of house wiring. While <i>grundoon</i> has a very solid connection, it is much slower than <i>churchy</i> and has only a microsecond clock.</p>
+        <table width="100%" cols="2">
+            <tr>
+                <td align="center">Digital Alpha <i>churchy.udel.edu</i></td>
+                <td align="center">Sun IPC <i>grundoon.udel.edu</i></td>
+            </tr>
+            <tr>
+                <td><img src="pic/churchy_51397_t.gif" alt="gif" align="left"></td>
+                <td><img src="pic/grundoon_51397_t.gif" alt="gif" align="left"></td>
+            </tr>
+            <tr>
+                <td><img src="pic/churchy_51397_f.gif" alt="gif" align="left"></td>
+                <td><img src="pic/grundoon_51397_f.gif" alt="gif" align="left"></td>
+            </tr>
+        </table>
+        <p>In spite of these deficiencies, the plots show that both systems can keep good time well below the microsecond. For <i>churchy</i> the RMS time error is 53 ns, while for <i>grundoon</i> the RMS error is 51 ns. While the RMS errors for the two systems are about the same, it is evident from the plots that the actual error is lower on <i>grundoon</i> than <i>churchy</i>; however, there are significantly more spikes in the characteristic, probably due to various hardware and software latencies. While <i>churchy</i> shows peak errors less than 200 ns, with better signal conditioning, it should keep the time in the low tens of nanoseconds.</p>
+        <p>The folowing plot from the original distribution shows the resulting histogram (probability density function) in log-log coordinates for a DEC 3000 Alpha, which has a 7.5 ns cycle time. To generate this plot, <tt>jitter.c</tt> programs were run simultaneously in two user processes for several minutes and the output of one of them processed to generate the plot. There is plenty of memory for both processes, so that page faults should not occur after initialization. There is a significant secondary peak at about 28 <font face="symbol">m</font>s which is probably due to the timer interrupt routine latency. The peaks above that up to 500 <font face="symbol">m</font>s are probably due to various cache latencies, context switching and system management functions. The peak near 1 ms may be due to context switches as the result of timer interrupts, but this conjecture is unproven. The peak near 10 ms is probably due to timeslicing; it does not occur when only a single process is running. The distribution has a long tail up to a significant fraction of a second, but the number of samples is small and widely dispersed.</p>
+        <div align="center">
+            <img src="pic/gtod1.gif" alt="gif"></div>
+        <p>The following plot from the original distribution shows the integral (cumulative distribution function) of the same data in log-log coordinates. Over 80 percent of the samples are less than 20 <font face="symbol">m</font>s, while only one sample in a million is greater than the timeslice quantum (assumed 10 ms), and only one in 100 million is greater than 100 ms.</p>
+        <div align="center">
+            <img src="pic/gtod2.gif" alt="gif"></div>
+        <hr>
+        <script type="text/javascript" language="javascript" src="scripts/footer.txt"></script>
+    </body>
+
+</html>

@@ -1,0 +1,1 @@
+document.write("<div class='footer'><a href='index.htm'><img src='pic/pogo6.gif' alt='gif' align='left'>Network Time Protocol Version 4<br></a></div>")

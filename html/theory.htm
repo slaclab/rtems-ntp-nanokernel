@@ -1,0 +1,141 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+
+    <head>
+        <title>Background and Analysis</title>
+        <link href="scripts/style.css" type="text/css" rel="stylesheet">
+    </head>
+
+    <body>
+        <h3>Background and Analysis</h3>
+        <h4>Table of Contents</h4>
+        <ul>
+            <li class="inline"><a href="#intro">Introduction</a>
+            <li class="inline"><a href="#allan">Allan Deviation</a>
+            <li class="inline"><a href="#phase">Phase and Frequency Offset Characteristics</a>
+            <li class="inline"><a href="#avg">The Effects of Averaging Interval</a>
+            <li class="inline"><a href="#ref">References</a>
+        </ul>
+        <hr>
+        <h4 id="#intro">Introduction</h4>
+        <p>In order to understand how the new kernel algorithms operate to improve the accuracy of the system clock, it is necessary to examine in detail the behavior of an undisciplined clock oscillator. The accuracy attainable with NTP, or any other protocol that provides periodic offset measurements, depends strongly on the stability of the oscillator and its adjustment mechanism. Typical oscillators utilize a quartz or surface acoustic wave (SAW) resonator without specific temperature, mechanical or drive stabilization. The temperature dependency of these oscillators is typically in the order of a part-per-million (PPM) in frequency per degree Celsius temperature change.</p>
+        <p>In order to reduce the residual time errors to the order of nanoseconds, it is necessary to use a precision source, such as a cesium oscillator or GPS timing receiver, and a PPS interface. For the results described in this presentation, a cesium oscillator was used as the precision source and the PPS interface used a pin of either a serial or parallel port interface. The experiment plan involved the collection of sample offsets measured at the interface with the clock discipline disabled and the system clock allowed to free-run. These data were then saved in a file and used by the <tt>kern</tt> simulator described on the <a href="util.htm">Utility Programs</a> page to generate the plots.</p>
+        <h4 id="#allan">Allan Deviation</h4>
+        <p>As shown in [1], it is possible to characterize the behavior of a typical quartz oscillator in terms of its Allan deviation as a function of averaging interval. A typical plot can be approximated by two intersecting straight lines in log-log scales. In general, white phase noise (jitter), which is represented by a straight line with slope -1 on the plot, dominates at the smaller intervals, while random-walk frequency noise (wander), which is represented by a straight line with slope +0.5, dominates at the larger intervals. The intersection of the two lines is called the Allan intercept, which serves to characterize the particular synchronization source and clock oscillator.</p>
+        <table width="100%" cols="1">
+            <tr>
+                <td align="center"><img src="pic/allan.gif" alt="gif"></td>
+                <td align="center"><img src="pic/phk.gif" alt="gif"></td>
+            </tr>
+            <tr>
+                <td align="center">Figure 1. Allan Deviation for Nanosecond and Microsecond Kernels</td>
+                <td align="center">Figure 2. Allan Deviation for Normal and SMI-Enabled Kernel</td>
+            </tr>
+        </table>
+        <p>Figure 1 shows the Allan deviation characteristics for four experiments distinguished with reference to the leftmost end of each trace. The uppermost trace (1) represents a typical computer oscillator and microsecond kernel, as described previously. The next lower trace (2) represents another computer oscillator and the nanosecond kernel, as described in this presentation. In both of these cases a cesium oscillator and PPS interface were used as the source and the computer oscillator allowed to free-run over periods ranging from 1.5 days to 10 days. The next lower trace (3) represents a synthetic model with phase noise limited only by the resolution of the microsecond kernel clock. The bottom trace (4) represents a synthetic model with phase noise limited only by the resolution of the nanosecond kernel clock.</p>
+        <p>Figure 1 clearly shows the Allan deviation for each case and how it is affected by the intrinsic jitter and wander. At the smaller averaging intervals with the cesium oscillator and PPS interface, the characteristic is dominated by sample jitter and interrupt latencies. Typical sample jitter contributions include noise pickup on the interface cable, incorrect cable impedance terminations and the reading resolution of the system clock itself. However, case (2) achieves lower jitter than case (1), primarily because the reading resolution of the nanosecond kernel is much lower than the microsecond kernel. While cases (1) and (2) involve real signals and kernels, the remaining cases involve synthetic data representing the best that can be done with either the microsecond kernel (3) or nanosecond kernel (4). For these cases the wander parameter was set to coincide with case (2). Obviously, there is room for improvement; however, further refinement is beyond the scope of this presentation.</p>
+        <p>At the larger averaging intervals, the characteristic is dominated by wander due to the individual oscillator design, crystal drive level, temperature variation and power supply regulation. Obviously, case (1) achieves lower wander than case (2) by a significant factor. This was due to the fact that, in case (1) the ambient room temperature was held to a narrow range less than one degree Celsius, while in case (2) the temperature varied over a much wider range on a hot Summer day in Denmark.</p>
+        <p>The main motivation for constructing the Allan deviation plot is to determine the Allan intercept for each combination of signal source and clock oscillator. The intercept represents the optimum averaging interval for the best clock accuracy and stability. If the averaging interval is less than the intercept, errors due to jitter dominate, while if greater than the intercept, errors due to wander dominate. The curves shown in Table 1 show intercepts that vary from 2 s for case (4) to 2000 s for case (1). For the best performance, it is necessary to tune the averaging intervals to match the intercept. Notwithstanding these observations, it is probably better to err on the high side of the intercept, since the slope of the wander characteristic is half that of the jitter characteristic. For the remainder of this presentation and unless otherwise noted, a compromise averaging interval of 128 s will be assumed.</p>
+        <table width="60%" cols="5">
+            <tr>
+                <td align="center">Case</td>
+                <td align="center">Kernel</td>
+                <td align="center">Time Interval</td>
+                <td align="center">Deviation</td>
+            </tr>
+            <tr>
+                <td align="center">1</td>
+                <td align="center">microsecond</td>
+                <td align="center">2000 s</td>
+                <td align="center">10<sup>-2</sup> s</td>
+            </tr>
+            <tr>
+                <td align="center">2</td>
+                <td align="center">nanosecond</td>
+                <td align="center">50</td>
+                <td align="center">3x10<sup>-2</sup></td>
+            </tr>
+            <tr>
+                <td align="center">3</td>
+                <td align="center">synthetic microsecond</td>
+                <td align="center">200</td>
+                <td align="center">5x10<sup>-3</sup></td>
+            </tr>
+            <tr>
+                <td align="center">4</td>
+                <td align="center">synthetic nanosecond</td>
+                <td align="center">2</td>
+                <td align="center">5x10<sup>-4</sup></td>
+            </tr>
+        </table>
+        <br>
+        Table 1. Allan Intercept
+        <p>A more careful examination of the particular nanosecond kernel used for case (2) reveals an interesting and important design issue. Recent Intel chipsets have provisions for a system management interrupt (SMI), which implements the automatic power management (APM) features and monitors temperature, voltages and fans. In general, the SMI is not controllable by the BIOS and must be enabled by a specific register. The effect of the SMI on the Allan deviation is shown in Figure 2. If the SMI is enabled, the upper trace results; if disabled, the lower trace results. Obviously, the SMI has a significant affect on timekeeping performance.</p>
+        <p>The result of the SMI on system timekeeping is shown in Figures 3 and 4. Figure 3 shows the phase offset with SMI disabled over a 1000 s interval, while Figure 4 shows the offset with SMI enabled over the same interval. The problem is immediately apparent as the occurrence of 50-<font face="symbol">m</font>s spikes at apparent intervals of about 250 s. The amplitude of the spikes represent the time in the SMI context. However, the actual interrupt rate cannot be directly determined, as the figure actually shows only the beat frequency against the PPS signal. There is no immediate explanation whether these spikes occur in other contexts or whether they occur with other chipsets. Apparently, some chipsets make better timekeepers than others.</p>
+        <table width="100%" cols="1">
+            <tr>
+                <td align="center"><img src="pic/DM40_tg.gif" alt="gif"></td>
+                <td align="center"><img src="pic/DM30_tg.gif" alt="gif"></td>
+            </tr>
+            <tr>
+                <td align="center">Figure 3. Phase Offset of Normal Kernel</td>
+                <td align="center">Figure 4. Phase Offset of SMI-Enabled Kernel</td>
+            </tr>
+        </table>
+        <h4 id="#phase">Phase and Frequency Offset Characteristics</h4>
+        <p>The figures below show the phase and frequency characteristic for the nanosecond kernel (case (2) Figures 5 and 6) and microsecond kernel (case (1) Figures 7 and 8). It is important to remember that the data on these plots are derived from the oscillator control signal <i>V<sub>c</sub></i> of the feedback loop. See the <a href="descrip.htm">Principles of Operation</a> page for further information. For these figures the cesium oscillator and PPS interface were used as the source for the PPS discipline. The cause of the higher wander with case (2) is readily apparent in the frequency offset characteristic of Figure 6, which is considerably more wiggly than Figure 8. In fact, there are some nasty discontinuities in Figure 6 due to extreme temperature variations during the particular experiment run. From experience, Figure 8 is more typical of workstations in temperature controlled office environments. Note also the grass in Figure 8, which is absent in Figure 6. While this does not seriously affect the phase offset, the cause is probably due the fact the microsecond kernel can resolve time values to only 1 <font face="symbol">m</font>s.</p>
+        <table width="100%" cols="1">
+            <tr>
+                <td align="center"><img src="pic/DM41_tp.gif" alt="gif"></td>
+                <td align="center"><img src="pic/DM41_fp.gif" alt="gif"></td>
+            </tr>
+            <tr>
+                <td align="center">Figure 5. Phase Offset for Nanosecond Kernel</td>
+                <td align="center">Figure 6. Frequency Offset for Nanosecond Kernel</td>
+            </tr>
+        </table>
+        <table width="100%" cols="1">
+            <tr>
+                <td align="center"><img src="pic/pps1_tp.gif" alt="gif"></td>
+                <td align="center"><img src="pic/pps1_fp.gif" alt="gif"></td>
+            </tr>
+            <tr>
+                <td align="center">Figure 7. Phase Offset for Microsecond Kernel</td>
+                <td align="center">Figure 8. Frequency Offset for Microsecond Kernel</td>
+            </tr>
+        </table>
+        <p>Figures 9 and 10 show the phase and frequency offsets for the synthetic data of case (4). Here the noise levels are considerably less than the other figures and represent the ultimate performance if the various residual sources of jitter and latency can be found and removed.</p>
+        <table width="100%" cols="1">
+            <tr>
+                <td align="center"><img src="pic/synth1_tp.gif" alt="gif"></td>
+                <td align="center"><img src="pic/synth1_fp.gif" alt="gif"></td>
+            </tr>
+            <tr>
+                <td align="center">Figure 9. Phase Offset for Synthetic Kernel</td>
+                <td align="center">Figure 10. Frequency Offset for Synthetic Kernel</td>
+            </tr>
+        </table>
+        <h4 id="#avg">The Effects of Averaging Interval</h4>
+        <p>Throughout this presentation until this point, it has been assumed that the optimum performance (lowest standard error) is achieved when the averaging interval is equal to the Allan intercept. Figures 11 and 12 show the standard error for the nanosecond kernel (case 2) and microsecond kernel (case 1) as the averaging interval is varied from 4 s to 32768 s.</p>
+        <table width="100%" cols="1">
+            <tr>
+                <td align="center"><img src="pic/DM4_p.gif" alt="gif"></td>
+                <td align="center"><img src="pic/pps_p.gif" alt="gif"></td>
+            </tr>
+            <tr>
+                <td align="center">Figure 11. Standard Error for Nanosecond Kernel</td>
+                <td align="center">Figure 12. Standard Error for Microsecond Kernel</td>
+            </tr>
+        </table>
+        <p>The lowest standard error is reached at 50 s in Figure 11 and 500 s in Figure 12. These values should be compared with the Allan intercept for each case, 50 s and 2000 s, respectively. While the Allan intercept is an accurate predictor of optimum averaging interval for the nanosecond kernel, it is less so for the microsecond kernel. On the other hand, the valley is quite broad and results in only minor increase in standard error over the range from 100 s to 5000 s. From these data a value of 128 s appears a good compromise choice.</p>
+        <p>It should be noted that the PPS discipline uses the averaging interval differently for phase averaging and frequency averaging. An exponential average is used for phase discipline, while a simple average is used for frequency discipline. The weight factor used for the exponential average is the reciprocal of the averaging interval. With this design the combined effect of the two discipline loops becomes marginally stable at the lowest averaging interval of 4 s and explains why the traces shown in the figures rise so fast at the lowest end. The interval of 4 s is used only at startup and after a drastic change in system clock frequency is sensed. The discipline increases the interval after that until reaching the maintaining the interval shown on the plot.</p>
+        <h4 id="#ref">References</h4>
+        <ol>
+            <li>Mills, D.L. Adaptive hybrid clock discipline algorithm for the Network Time Protocol. <i>IEEE/ACM Trans. Networking 6, 5</i> (October 1998), 505-514. <a href="http://www.eecis.udel.edu/~mills/database/papers/allan.ps">PostScript</a> | <a href="http://www.eecis.udel.edu/~mills/database/papers/allan.pdf">PDF</a>
+        </ol>
+        <hr>
+        <script type="text/javascript" language="javascript" src="scripts/footer.txt"></script>
+    </body>
+
+</html>

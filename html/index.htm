@@ -1,0 +1,60 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+
+    <head>
+        <title>Generic Nanosecond Kernel Timekeeping Support</title>
+        <link href="scripts/style.css" type="text/css" rel="stylesheet">
+    </head>
+
+    <body>
+        <h3>Generic Nanosecond Kernel Timekeeping Support</h3>
+        <img src="pic/tonea.gif" alt="gif" align="left"> From NBS Special Publication 432 (out of print)
+         <h4>Related Links</h4>
+            &#149; <a href="api.htm">Application Program Interface</a><br>
+            &#149; <a href="descrip.htm">Principles of Operation</a><br>
+            &#149; <a href="theory.htm">Background and Analysis</a><br>
+            &#149; <a href="changes.htm">Changes Since RFC-1589</a><br>
+            &#149; <a href="implem.htm">Implementation Notes</a><br>
+            &#149; <a href="proof.htm">Proof of Performance</a><br>
+            &#149; <a href="util.htm">Utility Programs</a>
+            <br clear=left>
+        <h4>Table of Contents</h4>
+        <ul>
+        <li class=inline><a href=#intro>Introduction</a>
+        <li class=inline><a href="#kernel">Kernel Clock Discipline</a>
+        <li class=inline><a href="#micro">Nanosecond Clock</a>
+        <li class=inline><a href="#groom">Data Grooming</a>
+        <li class=inline><a href="#ref">References</a>
+        </ul>
+        <hr>
+        <h4 id=#intro>Introduction</h4>
+        <p>This software distribution consists of generic Unix kernel modifications designed to improve the accuracy of the system clock to the order of nanoseconds. It improves the accuracy and stability of the original design described in [2] and a later one dated 29 March 1999. The latest improvement amounts to a reduction of about ten times in the residual time and frequency errors. A general discussion on the issues involved in these designs is on the <a href="theory.htm">Background and Analysis</a> page.</p>
+        <p>This distribution includes a set of subroutines to be incorporated in the Unix kernels of various architectures, including Digital (Alpha and RISC), Hewlett Packard, Sun Microsystems (SPARC) and Intel (PC). Changes since the original design described in [2] are discussed on the <a href="changes.htm">Changes Since RFC-1589</a> page. The new design has been implemented in the current Digital Unix, Sun Microsystems Solaris, Linux and FreeBSD kernels. Information on the <a href="implem.htm">Implementation Notes</a> page should be helpful when porting this code to other architectures.</p>
+        <p>The primary purpose of these modifications is to improve timekeeping accuracy to the order less than a millisecond and, ultimately, to a nanosecond. They do this by replacing the clock discipline algorithm in a synchronization daemon, such as the Network Time Protocol [1], with equivalent functionality in the kernel. While clock corrections are executed once per second in the daemon, they are executed at every tick interrupt in the kernel. This avoids sawtooth errors that accumulate between daemon executions. The greatest benefit is when the clock oscillator frequency error is large (above 100 PPM) and when the NTP subnet path to the primary reference source includes only servers with these modifications. However, in cases involving long Internet paths and congested networks with large delay jitter or when the interval between synchronization updates is large (greater than 1024 s), the benefits are reduced. The primary reason for the reduction is that the errors inherent in the time measurement process greatly exceed those inherent in the clock discipline algorithm, whether implemented in the daemon or the kernel.</p>
+        <p>The software can be compiled for 64-bit machines, in which some variables occupy the full 64-bit word, or for 32-bit machines, where these variables are implemented using a macro package for double precision arithmetic. The software can be compiled for kernels where the time variable is represented in seconds and nanoseconds and for kernels in which this variable is represented in seconds and microseconds. In either case, and when the requisite hardware counter is available, the resolution of the system clock is to the nanosecond. Even if the resolution of the system clock is only to the microsecond, the software provides extensive signal grooming and averaging to minimize the reading errors.</p>
+        <h4 id="#kernel">Kernel Clock Discipline</h4>
+        <div align="center">
+            <img src="pic/pllfll.gif" alt="gif"></div>
+        <br clear="right">
+        <div align="center">
+            Figure 1. Kernel Clock Discipline</div>
+        <p>Figure 1 shows the general organization of the kernel clock discipline algorithm. Updates produced by the synchronization daemon (in this case NTP) are processed by the <tt>hardupdate()</tt> routine, while pulse-per-second (PPS) signal interrupts (when used) are processed by the <tt>hardpps()</tt> routine. The phase and frequency predictions computed by either or both routines are selected by the interface described on the <a href="api.htm">Application Program Interface</a> (API) page. The actual corrections are redetermined once per second and linearly amortized over the second at each hardware tick interrupt. The increment at each interrupt is calculated using extended precision arithmetic to preserve nanosecond resolution and avoid overflows over the range of clock oscillator frequencies from below 50 Hz to above 1000 Hz.</p>
+        <p>Both the <tt>hardupdate()</tt> and <tt>hardpps()</tt> routines include improved algorithms to discipline the computer clock in nanoseconds in time and nanoseconds per second in frequency, regardless of whether the kernel time variable has a precision of one microsecond or one nanosecond. There are two files which implement the nanosecond time discipline, <tt>ktime.c</tt> and <tt>micro.c</tt>. The <tt>ktime.c</tt> file includes code fragments that implement the <tt>hardupdate()</tt> and <tt>hardpps()</tt> routines, as well as the <tt>ntp_gettime()</tt> and <tt>ntp_adjtime()</tt> system calls that implement the API. These routines can be compiled for both 64-bit and 32-bit architectures. Detailed information on how these routines work can be found on the <a href="descrip.htm">Principles of Operation</a> page.</p>
+        <h4 id="#micro">Nanosecond Clock</h4>
+        <p>The <tt>micro.c</tt> file implements a nanosecond clock using the tick interrupt augmented by a process cycle counter (PCC) found in most modern computer architectures, including Alpha, SPARC and Intel. In its present form, it can be compiled only for 64-bit architectures. The <tt>nano_time()</tt> routine measures the intrinsic processor clock rate, then interpolates the nanoseconds be scaling the PCC to one second in nanoseconds. The design supports symmetric multiple processor (SMP) systems with common or separate processor clocks of the same or different frequencies. The system clock can be read by any processor at any time without compromising monotonicity or jitter. When a PPS signal is connected, the PPS interrupt can be vectored to any processor. The tick interrupt must always be vectored to a single processor, but it doesn't matter which one. The routine also supports a microsecond clock for legacy purposes.</p>
+        <h4 id="#groom">Data Grooming</h4>
+        <p>At each processing step, limit clamps are imposed to avoid overflow and prevent runaway phase or frequency excursions. In particular, the update provided by the synchronization daemon is clamped not to exceed &plusmn;500 ms and the calculated frequency offset clamped not to exceed &plusmn;500 PPM. The maximum phase offset exceeds that allowed by the NTP daemon, normally &plusmn;128 ms. Moreover, the NTP daemon includes an extensive suite of data grooming algorithms which filter, select, cluster and combine time values before presenting then to either the NTP or kernel clock discipline algorithms.</p>
+        <p>The extremely intricate nature of the kernel modifications requires a high level of rigor in the design and implementation. Following previous practice, the routines have been embedded in a special purpose, discrete event simulator. In this context it is possible not only to verify correct operation over the wide range of tolerances likely to be found in current and future computer architectures and operating systems, but to verify that resolution and accuracy specifications can be met with precision synchronization sources. The simulator can measure the response to time and frequency transients, monitor for unexpected interactions between the simulated tick oscillator, PCC and PPS signals, and verify correct monotonic behavior as the oscillator counters overflow and underflow due to small frequency variations. The simulator can also read data files produced during regular operation in order to determine the behavior of the modifications under actual conditions.</p>
+        <p>The kernels of both SunOS 4.1.3 and Digital Unix 4.0 have been modified to incorporate these routines. Both the <tt>ktime.c</tt> and <tt>micro.c</tt> routines were used in the Digital Unix kernel for the Alpha, which has a PCC. Only the <tt>ktime.c</tt> routine was used in the SunOS kernel, since the SPARC IPC used for test does not have a PCC. Each of the two systems includes provisions for a PPS signal using a serial or parallel port control signal. Correct operation has been confirmed using utility programs described on the <a href="util.htm">Utility Programs</a> page and in the NTP distribution. The results of performance tests are described in the <a href="proof.htm">Proof of Performance</a> page.</p>
+        <p>It is important to note that the actual code used in the Alpha and SPARC kernels is very nearly identical to the code used in the simulator. The only differences in fact have to do with the particular calling and argument passing conventions of each system. This is important in order to preserve correctness assertions, accuracy claims and performance specifications.</p>
+       <h4 id="#ref">References</h4>
+        <ol>
+            <li>Mills, D.L. Network Time Protocol (Version 3) specification, implementation and analysis. Network Working Group Report RFC-1305, University of Delaware, March 1992, 113 pp. Abstract: <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1305/rfc1305a.ps">PostScript</a> | <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1305/rfc1305a.pdf">PDF</a>, Body: <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1305/rfc1305b.ps">PostScript</a> | <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1305/rfc1305b.pdf">PDF</a>, Appendices: <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1305/rfc1305c.ps">PostScript</a> | <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1305/rfc1305c.pdf">PDF</a>
+            <li>Mills, D.L. Unix kernel modifications for precision time synchronization. Electrical Engineering Department Report 94-10-1, University of Delaware, October 1994, 24 pp. Abstract: <a href="http://www.eecis.udel.edu/~mills/database/reports/kern/kerna.ps">PostScript</a> | <a href="http://www.eecis.udel.edu/~mills/database/reports/kern/kerna.pdf">PDF</a>, Body: <a href="http://www.eecis.udel.edu/~mills/database/reports/kern/kernb.ps">PostScript</a> | <a href="http://www.eecis.udel.edu/~mills/database/reports/kern/kernb.pdf">PDF</a> Major revision and update of: Network Working Group Report RFC-1589, University of Delaware, March 1994. 31 pp. <a href="http://www.eecis.udel.edu/~mills/database/rfc/rfc1589.txt">ASCII</a>
+        </ol>
+        <hr>
+        <script type="text/javascript" language="javascript" src="scripts/footer.txt"></script>
+    </body>
+
+</html>

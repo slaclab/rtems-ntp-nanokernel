@@ -1,0 +1,37 @@
+See the ./html/index.htm for run-time documentation
+
+A "make" with just about any dirty rottten C compiler will bake the test
+and demonstration program. The program is not intended to do anything other
+than verify the impulse response of the clock discipline loop and look for
+glitches.
+
+The routines are designed to be implemented in the kernels of generic
+operating systems in a reasonably portable way, although the definition
+of portable here is rather loose. Comments are liberally sprinkled in
+the sources and should give guidance where the code fragments go. There
+are two principle routines, ktime.c and micro.c. The ktime.c routine is
+is to be integrated with usual Unix suspect kern_clock.c or whaterver name
+this function has been morphed to.  This routine handles timer interrupts,
+increments the clock tick and handles the second overflow. The micro.c
+routine interpolates between timer interrupts in order to provide nanosecond
+resolution.
+
+These routines have been integrated in stock kernels for FreeBSD and is an
+available add-on for Linux. An earlier version is in the stock kernels
+for Digital Alpha (or whatever name that has morphed to), and Solaris. The
+header files and some code fragments are in the alpha, freebsd, solaris and
+sunos directories in this distribution.
+
+The pulse-per-second (PPS) interface support is also in this distribution,
+although in fragmentary form. It is available in stock kernels for Solaris
+and FreeBSD and is an available add-on for Linux. Although it has been
+implemented for Alpha and SunOS, it never made it to the stock kernels.
+
+The tprotime.c and tpro.h are for SunOS SBus machines, which are rather rare
+these days. The TPRO board is a precision oscillator/counter synchronized
+to an IRIG signal. Once upon a time the SunOS kernel was modified to use
+it as the system clock, which provided truly awesome performance. It is
+included here by way of historic reminder.
+
+Dave Mills
+23 September 2002
