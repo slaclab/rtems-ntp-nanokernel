@@ -38,7 +38,7 @@ OBJS=$(C_O_FILES) $(CC_O_FILES) $(S_O_FILES)
 # linked application is generated.
 # If it has a '.obj' extension, a loadable module is built.
 
-PGMS=${ARCH}/ntptst.obj
+PGMS=${ARCH}/ntpclock.obj
 
 #  List of RTEMS Classic API Managers to be included in the application
 #  goes here. Use:

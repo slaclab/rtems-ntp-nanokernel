@@ -53,9 +53,9 @@
 
 
 /* =========== PUBLIC GLOBALS ======================== */
-volatile unsigned      rtems_ntp_debug = 1;
+volatile unsigned      rtems_ntp_debug = 0;
 volatile unsigned      rtems_ntp_daemon_sync_interval_secs = DAEMON_SYNC_INTERVAL_SECS;
-FILE		  		   *rtems_ntp_debug_file;
+FILE		  		   *rtems_ntp_debug_file = 0;
 
 /* =========== GLOBAL VARIABLES ====================== */
 
