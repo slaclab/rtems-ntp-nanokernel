@@ -97,7 +97,7 @@
 #define _SYS_TIMEX_H_ 1
 #define NTP_API		4	/* NTP API version */
 
-#ifndef MSDOS			/* Microsoft specific */
+#if !defined(MSDOS) && !defined(__rtems__)			/* Microsoft specific */
 #include <sys/syscall.h>
 #endif /* MSDOS */
 

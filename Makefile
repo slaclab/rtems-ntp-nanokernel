@@ -1,37 +1,121 @@
 #
-# Makefile for kern
+#  Makefile.leaf,v 1.7 2002/07/22 22:56:09 joel Exp
 #
-PROGRAM= kern
-COMPILER= gcc
-COPTS= -Wall
-BINDIR= /usr/local/bin
-INSTALL= install
-DEFS=
+# Templates/Makefile.leaf
+# 	Template leaf node Makefile
 #
-INCL= -I../include
-CFLAGS= $(COPTS) $(DEFS) $(INCL)
-CC= $(COMPILER)
-LIB= -lm
+
+USE_MICRO=YES
+
+# C source names, if any, go here -- minus the .c
+C_PIECES=ktime rtemsdep $(C_PIECES_USE_MICRO_$(USE_MICRO))
+C_FILES=$(C_PIECES:%=%.c)
+C_O_FILES=$(C_PIECES:%=${ARCH}/%.o)
+
+C_PIECES_USE_MICRO_YES=micro
+DEFINES_USE_MICRO_YES=-DUSE_MICRO
+
+# C++ source names, if any, go here -- minus the .cc
+CC_PIECES=
+CC_FILES=$(CC_PIECES:%=%.cc)
+CC_O_FILES=$(CC_PIECES:%=${ARCH}/%.o)
+
+H_FILES=
+
+# Assembly source names, if any, go here -- minus the .S
+S_PIECES=
+S_FILES=$(S_PIECES:%=%.S)
+S_O_FILES=$(S_FILES:%.S=${ARCH}/%.o)
+
+SRCS=$(C_FILES) $(CC_FILES) $(H_FILES) $(S_FILES)
+OBJS=$(C_O_FILES) $(CC_O_FILES) $(S_O_FILES)
+
+# If your PGMS target has the '.exe' extension, a statically
+# linked application is generated.
+# If it has a '.obj' extension, a loadable module is built.
+
+PGMS=${ARCH}/ntptst.obj
+
+#  List of RTEMS Classic API Managers to be included in the application
+#  goes here. Use:
+#     MANAGERS=all
+# to include all RTEMS Classic API Managers in the application or
+# something like this to include a specific set of managers.
+#     MANAGERS=io event message rate_monotonic semaphore timer
 #
-SOURCE= kern.c ktime.c micro.c gauss.c
-OBJS= kern.o ktime.o micro.o gauss.o
-EXEC= kern
+# UNUSED for loadable modules
+MANAGERS=XXX
 
-all:	$(PROGRAM)
+include $(RTEMS_MAKEFILE_PATH)/Makefile.inc
 
-kern:	$(OBJS)
-	$(CC) $(COPTS) -o $@ $(OBJS) $(LIB)
+include $(RTEMS_CUSTOM)
+include $(RTEMS_ROOT)/make/leaf.cfg
 
-install: $(BINDIR)/$(PROGRAM)
+#
+# (OPTIONAL) Add local stuff here using +=
+#
 
-$(BINDIR)/$(PROGRAM): $(PROGRAM)
-	$(INSTALL) -c -m 0755 $(PROGRAM) $(BINDIR)
+DEFINES  += $(DEFINES_USE_MICRO_$(USE_MICRO))
+CPPFLAGS +=
+CFLAGS   +=
 
-tags:
-	ctags *.c *.h
+#
+# CFLAGS_DEBUG_V are used when the `make debug' target is built.
+# To link your application with the non-optimized RTEMS routines,
+# uncomment the following line:
+# CFLAGS_DEBUG_V += -qrtems_debug
+#
 
-depend:
-	mkdep $(CFLAGS) $(SOURCE)
+#LD_PATHS  += xxx-your-EXTRA-library-paths-go-here, if any
+#LD_LIBS   += xxx-your-libraries-go-here eg: -lvx
+LDFLAGS   +=
 
-clean:
-	-@rm -f $(PROGRAM) $(EXEC) $(OBJS)
+#
+# Add your list of files to delete here.  The config files
+#  already know how to delete some stuff, so you may want
+#  to just run 'make clean' first to see what gets missed.
+#  'make clobber' already includes 'make clean'
+#
+
+#CLEAN_ADDITIONS += xxx-your-debris-goes-here
+CLOBBER_ADDITIONS +=
+
+all:	${ARCH} $(SRCS) $(PGMS)
+
+#How to make a relocatable object
+$(filter %.obj, $(PGMS)): ${OBJS}
+	$(make-obj)
+
+#How to make an executable (statically linked)
+$(filter %.exe,$(PGMS)): ${LINK_FILES}
+	$(make-exe)
+ifdef ELFEXT
+ifdef XSYMS
+	$(XSYMS) $(@:%.exe=%.$(ELFEXT)) $(@:%.exe=%.sym)
+endif
+endif
+
+ifndef RTEMS_SITE_INSTALLDIR
+RTEMS_SITE_INSTALLDIR = $(PROJECT_RELEASE)
+endif
+
+${RTEMS_SITE_INSTALLDIR}/include \
+${RTEMS_SITE_INSTALLDIR}/lib \
+${RTEMS_SITE_INSTALLDIR}/bin \
+${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/include \
+${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/lib \
+${RTEMS_SITE_INSTALLDIR}/$(RTEMS_BSP)/bin :
+	test -d $@ || mkdir -p $@
+
+# Install the program(s), appending _g or _p as appropriate.
+# for include files, just use $(INSTALL_CHANGE)
+#
+# NOTES:
+#  - BSP specific applications, headers etc. should be installed to 
+#          $RTEMS_SITE_INSTALLDIR)/$(RTEMS_BSP)/bin
+#
+#  - Some BSPs might generate bootable executables in yet another
+#    format (such as .srec) and you might need to extend the rule
+#    below so the essential files get installed. YMMV.
+install:  all $(RTEMS_SITE_INSTALLDIR)/bin
+	$(INSTALL_VARIANT) -m 555 ${PGMS} ${PGMS:%.exe=%.bin} ${PGMS:%.exe=%.sym} ${RTEMS_SITE_INSTALLDIR}/bin

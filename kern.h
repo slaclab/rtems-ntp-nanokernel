@@ -94,12 +94,14 @@ typedef struct timespec {	/* definition per POSIX.4 */
  * MASTER_CPU; if this is zero, the PPS interrupts go to the same
  * processor as well.
  */
-/* #define EXT_CLOCK		/* external clock option */
+#if 0
+#define EXT_CLOCK		/* external clock option */
 #define PPS_SYNC		/* PPS discipline option */
+#endif
 #define _KERNEL			/* supppress /usr/include/time.h */
 #define ROOT		0	/* 0 = superuser, 1 = other */
 #define CPU_CLOCK	433000000 /* default CPU clock speed (Hz) */
-#define NCPUS		8	/* number of SMP processors */
+#define NCPUS		1	/* number of SMP processors */
 #define MASTER_CPU	0	/* where the tick interrupts go */
 
 /*
@@ -123,7 +125,9 @@ extern void hardpps(struct timespec *, long);
 extern long nano_time(struct timespec *);
 extern void microset(void);
 extern int cpu_number(void);
+#ifndef __rtems__
 extern long long rpcc(void);
+#endif
 extern int ntp_adjtime(struct timex *);
 
 /*
@@ -134,8 +138,13 @@ extern struct timespec TIMEVAR;	/* kernel nanosecond clock */
 #else
 extern struct timeval TIMEVAR;	/* kernel microsecond clock */
 #endif /* NTP_NANO */
+#ifndef __rtems__
 extern int hz;			/* tick interrupt frequency (Hz) */
 extern int splextreme(), splsched(), splclock(), splx();
+#else
+#include "rtemsdep.h"
+#define hz TIMER_FREQ
+#endif
 
 /*
  * The following variables are defined in the nanokernel code.
