@@ -239,7 +239,7 @@ static inline void ufrac2ts(unsigned long long f, struct timespec *pts)
 }
 
 long
-rtems_ntp_print_maxdiff(int reset)
+rtemsNtpPrintMaxdiff(int reset)
 {
 time_t    t;
 long long t4;
@@ -280,7 +280,7 @@ static void printNtpTimestamp(struct timestamp *p)
 }
 
 unsigned
-ntpdiff()
+rtemsNtpDiff()
 {
 DiffTimeCbDataRec d;
 	if ( 0 == rtems_bsdnet_get_ntp(-1,diffTimeCb, &d) ) {
@@ -299,7 +299,7 @@ static int copyPacketCb(struct ntpPacketSmall *p, int state, void *usr_data)
 }
 
 unsigned
-ntppack(void *p)
+rtemsNtpPacketGet(void *p)
 {
 	return rtems_bsdnet_get_ntp(-1,copyPacketCb,p);
 }
@@ -543,7 +543,7 @@ rtems_event_set		got;
 }
 #endif
 
-void
+int
 rtemsNtpInitialize(unsigned tickerPri, unsigned daemonPri)
 {
 struct timex          ntv;
@@ -582,7 +582,7 @@ struct timespec       initime;
 
 #ifdef USE_PICTIMER
 	if ( pictimerInstallClock( TIMER_NO ) ) {
-		return;
+		return -1;
 	}
 #endif
 
@@ -604,7 +604,7 @@ struct timespec       initime;
 								0,
 								&mutex_id ) ) {
 		printf("Unable to create mutex\n");
-		return;
+		return -1;
 	}
 
 	if ( RTEMS_SUCCESSFUL != rtems_task_create(
@@ -616,7 +616,7 @@ struct timespec       initime;
 								&rtems_ntp_ticker_id) ||
 	     RTEMS_SUCCESSFUL != rtems_task_start( rtems_ntp_ticker_id, tickerDaemon, 0) ) {
 		printf("Clock Ticker daemon couldn't be started :-(\n");
-		return;
+		return -1;
 	}
 
 	if ( RTEMS_SUCCESSFUL != rtems_task_create(
@@ -628,7 +628,7 @@ struct timespec       initime;
 								&daemon_id) ||
 	     RTEMS_SUCCESSFUL != rtems_task_start( daemon_id, ntpDaemon, 0) ) {
 		printf("NTP daemon couldn't be started :-(\n");
-		return;
+		return -1;
 	}
 
 #ifdef USE_METHOD_B_FOR_DEMO
@@ -647,6 +647,11 @@ struct timespec       initime;
 #endif
 
 	printf("NTP synchro code initialized; this is EXPERIMENTAL\n");
+#ifdef USE_NO_HIGH_RESOLUTION_CLOCK
+	fprintf(stderr,"WARNING: High resolution clock not implemented for this CPU\n");
+	fprintf(stderr,"         please contribute to <ntpNanoclock/pcc.h>\n");
+#endif
+	return 0;
 }
 
 int rtemsNtpCleanup()
@@ -718,7 +723,7 @@ static char *yesno(struct timex *p, unsigned mask)
 }
 
 
-long dumpNtpStats(FILE *f)
+long rtemsNtpDumpStats(FILE *f)
 {
 struct timex ntp;
 
@@ -750,6 +755,6 @@ struct timex ntp;
 		fprintf(stderr,"   %lu clicks/%lu ns = %.10g MHz\n",
 							pcc_denominator,
 							pcc_numerator,
-							(double)pcc_denominator/(double)pcc_numerator*1000.);
+							pcc_numerator ? (double)pcc_denominator/(double)pcc_numerator*1000. : (double)-1.);
 	return 0;
 }

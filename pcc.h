@@ -28,12 +28,8 @@ typedef unsigned long pcc_t;
  *
  */
 
-#ifdef USE_NO_HIGH_RESOLUTION_CLOCK
 
-static inline pcc_t getPcc() 		{ return 0; }
-static inline pcc_t setPccBase() 	{ return 0; }
-
-#else
+#ifndef USE_NO_HIGH_RESOLUTION_CLOCK
 
 #ifdef __PPC__
 
@@ -127,10 +123,20 @@ extern pcc_t setPccBase();
 #endif
 
 #else	/* ifdef __PPC__ */
-extern pcc_t getPcc();
-extern pcc_t setPccBase();
+
+#warning No High Resolution Clock Implementation for this CPU, please add to pcc.h (DISABLED)
+#define  USE_NO_HIGH_RESOLUTION_CLOCK
+
 #endif
 
 #endif /* ifdef USE_NO_HIGH_RESOLUTION_CLOCK */
+
+#ifdef USE_NO_HIGH_RESOLUTION_CLOCK
+
+static inline pcc_t getPcc() 		{ return 0; }
+static inline pcc_t setPccBase() 	{ return 0; }
+
+#endif
+
 
 #endif
