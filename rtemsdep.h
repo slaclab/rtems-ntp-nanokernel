@@ -7,14 +7,13 @@
 
 #include <rtems.h>
 
-#ifndef USE_DECREMENTER
-extern rtems_id rtems_ntp_mqueue;
-#endif
-
-
 #define cpu_number() (0)
 
 #define splsched() (0)
 #define splextreme() (0)
+
+#if defined(USE_PICTIMER) && !defined(__PPC__)
+#error Configuration error -- cannot use PICTIMER on non-PowerPC arch
+#endif
 
 #endif

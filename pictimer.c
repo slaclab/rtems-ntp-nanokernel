@@ -11,6 +11,8 @@
 #include "kern.h"
 #include "rtemsdep.h"
 #include "timex.h"
+#include "pictimer.h"
+#include "pcc.h"
 
 #define TIMER_IVEC 					BSP_MISC_IRQ_LOWEST_OFFSET
 #define TIMER_NO  					0	/* note that svgmWatchdog uses T3 */
@@ -20,41 +22,41 @@
 static unsigned long base_count;
 static unsigned long timer_period_ns;
 
-unsigned long rtems_ntp_nano_ticks;
 
 unsigned rtems_ntp_pictimer_irqs_missed = 0;
 
+extern rtems_id rtems_ntp_ticker_id;
+
+#ifndef USE_METHOD_B_FOR_DEMO
+unsigned nano_ticks;
+#endif
+
 static void isr(void *arg)
 {
-pcc_t	pcc;
-#ifdef USE_MICRO
-	pcc = rpcc();
-#else
-	rtems_ntp_nano_ticks = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
+#ifdef USE_METHOD_B_FOR_DEMO
+	rtems_ntp_isr_snippet();
+#else	
+	nano_ticks = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
 #endif
-	if ( RTEMS_SUCCESSFUL != rtems_message_queue_send(rtems_ntp_mqueue, &pcc, sizeof(pcc)) )
+
+	if ( RTEMS_SUCCESSFUL != rtems_event_send(rtems_ntp_ticker_id, PICTIMER_SYNC_EVENT) )
 		rtems_ntp_pictimer_irqs_missed++;
 }
 
-#ifndef USE_MICRO
-long nano_time(struct timespec *tp)
+#ifndef USE_METHOD_B_FOR_DEMO
+pcc_t
+getPcc()
 {
-long cnt,tgl;
+pcc_t cnt,tgl;
 unsigned flags;
 
 	/* disable timer ticks */
 	flags = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority );
 	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority, flags | OPENPIC_MASK );
 
-#ifdef NTP_NANO
-	*tp = TIMEVAR;
-#else
-	tp->tv_sec  = TIMEVAR.tv_sec;
-	tp->tv_nsec = TIMEVAR.tv_usec * 1000;
-#endif
 
 	cnt = in_le32( &OpenPIC->Global.Timer[TIMER_NO].Current_Count );
-	tgl = cnt ^ rtems_ntp_nano_ticks;
+	tgl = cnt ^ nano_ticks;
 
 	/* reenable timer ticks */
 	out_le32( &OpenPIC->Global.Timer[TIMER_NO].Vector_Priority, flags );
@@ -69,15 +71,13 @@ unsigned flags;
 	/* OPENPIC timer runs backwards */
 	cnt = base_count - cnt;
 
-	/* accept some roundoff error */
-	tp->tv_nsec += cnt * timer_period_ns;
-	/* assume the tick timer is running faster than 1Hz */
-	if ( tp->tv_nsec >= NANOSECOND ) {
-		tp->tv_nsec-=NANOSECOND;
-		tp->tv_sec++;
-	}
+	return cnt;
+}
 
-	return 0;
+pcc_t
+setPccBase()
+{
+	return base_count;
 }
 #endif
 

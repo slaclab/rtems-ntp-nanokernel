@@ -132,8 +132,6 @@ extern void microset(void);
  *     value saved by the ISR. The call must be issued PRIOR
  *     to updating TIMEVAR (ntp_tick_adjust).
  */
-#include "pcc.h"
-extern void microset_from_saved(pcc_t pcc, struct timespec *tsp);
 
 extern int cpu_number(void);
 
