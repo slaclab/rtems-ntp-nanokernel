@@ -38,7 +38,7 @@
 #define		NTP_DEBUG_MISC          2   /* misc utils (beware of symbol clashes) */
 #define     NTP_DEBUG_FILTER		4   /* print info about trivial filtering algorithm */
 
-#define DAEMON_SYNC_INTERVAL_SECS	1	/* default sync interval */
+#define DAEMON_SYNC_INTERVAL_SECS	600	/* default sync interval */
 
 #define KILL_DAEMON					RTEMS_EVENT_1
 
@@ -645,6 +645,8 @@ struct timespec       initime;
 #ifdef USE_PROFILER
 	pictimerProfileInstall();
 #endif
+
+	printf("NTP synchro code initialized; this is EXPERIMENTAL\n");
 }
 
 int rtemsNtpCleanup()

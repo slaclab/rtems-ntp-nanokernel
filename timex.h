@@ -96,6 +96,7 @@
 #ifndef _SYS_TIMEX_H_
 #define _SYS_TIMEX_H_ 1
 #define NTP_API		4	/* NTP API version */
+#define NTP_NANO
 
 #if !defined(MSDOS) && !defined(__rtems__)			/* Microsoft specific */
 #include <sys/syscall.h>

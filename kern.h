@@ -67,7 +67,8 @@ typedef struct timespec {	/* definition per POSIX.4 */
  * delivered to the user is in seconds and nanoseconds in either a
  * timeval or a timespec structure.
  */
-#define NTP_NANO		/* kernel nanosecond clock */
+/* #define NTP_NANO */		/* kernel nanosecond clock */
+/* T.Straumann: we define NTP_NANO in 'timex.h' because that's what applications see */
 
 /*
  * If NTP_L64 is defined, the package is configured for a 64-bit
