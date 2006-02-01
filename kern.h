@@ -77,7 +77,12 @@ typedef struct timespec {	/* definition per POSIX.4 */
  * architecture. This works with both 32-bit and 64-bit architectures,
  * but is somewhat slower than the 64-bit version.
  */
-#define NTP_L64			/* 64-bit architecture */
+#define NTP_L64 			/* 64-bit architecture */
+
+#ifdef __m68k__
+/* T.S. 68k gcc somehow doesn't grok some long long operation */
+#undef NTP_L64
+#endif
 
 /*
  * Package header files which should be copied to /usr/include/sys.
