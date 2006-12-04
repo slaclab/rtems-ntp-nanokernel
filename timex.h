@@ -102,6 +102,10 @@
 #include <sys/syscall.h>
 #endif /* MSDOS */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * The following defines establish the performance envelope of the
  * kernel discipline loop. Phase or frequency errors greater than
@@ -221,4 +225,12 @@ struct timex {
 	long	errcnt;		/* calibration errors (ro) */
 	long	stbcnt;		/* stability limit exceeded (ro) */
 };
+
+int ntp_gettime(struct ntptimeval *);
+int ntp_adjtime(struct timex *);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* _SYS_TIMEX_H_ */
