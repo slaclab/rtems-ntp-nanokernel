@@ -553,7 +553,12 @@ struct timespec       initime;
 		tickerPri = 30; /* higher than network and most other things */
 	}
 	if ( ! daemonPri ) {
-		daemonPri = 40;
+		daemonPri = rtems_bsdnet_config.network_task_priority;
+		if ( ! daemonPri )
+			daemonPri = 100;
+
+		if ( daemonPri > 2 )
+			daemonPri -= 2;
 	}
 	/* TODO: recover frequency from NVRAM; read time from hwclock */
 
