@@ -68,6 +68,46 @@ pcc_t oldbase = pcc_base;
 
 /* PowerPC 'Method A' implementation -- use for production */
 
+extern unsigned Clock_Decrementer_value;
+
+#define HRC_PERIOD Clock_Decrementer_value
+static inline unsigned PPC_HRC_READ()
+{
+unsigned	val;
+	PPC_Get_decrementer(val);
+	return val;
+}
+#define HRC_READ()	PPC_HRC_READ()
+
+#else /* if method_B elif !pictimer */
+/* pictimer.c provides an implementation for method A */
+extern pcc_t getPcc();
+extern pcc_t setPccBase();
+#endif
+
+#elif defined(__mcf528x__)
+
+#include <bsp.h>
+
+#warning "High-resolution clock implementation for the uC5282 BSP only - but I can't check for BSP in header"
+
+static inline unsigned UC5282_HRC_READ()
+{
+unsigned rval = MCF5282_PIT3_PCNTR;
+	return rval;
+}
+
+#define HRC_READ() UC5282_HRC_READ()
+#define HRC_PERIOD	BSP_Configuration.microseconds_per_tick
+
+#else /* ifdef __PPC__ */
+
+#warning No High Resolution Clock Implementation for this CPU, please add to pcc.h (DISABLED)
+#define  USE_NO_HIGH_RESOLUTION_CLOCK
+
+#endif
+
+#if defined(HRC_PERIOD) && defined(HRC_READ)
 /* this routine returns the difference between the current PCC
  * and the PCC base time (==IRQ time).
  * In Method A, we know that the base time is actually always 0.
@@ -81,7 +121,6 @@ pcc_t oldbase = pcc_base;
  */
 
 static rtems_unsigned32 tick_base;
-extern unsigned Clock_Decrementer_value;
 
 static inline pcc_t getPcc()
 {
@@ -94,44 +133,31 @@ unsigned		rtemsTicks;
 	 * atomical...
 	 */
 	rtems_interrupt_disable( flags );
-	PPC_Get_decrementer(pcc);
+	pcc = HRC_READ();
 	rtemsTicks   = Clock_driver_ticks;
 	rtems_interrupt_enable( flags );
 
 	/* even correct if the decrementer has underflown */
-	pcc = Clock_Decrementer_value - pcc;
+	pcc = HRC_PERIOD - pcc;
 
 	/* account for the number of ticks expired since setPccBase()
 	 * was called for the last time
 	 */
 	rtemsTicks = rtemsTicks - tick_base;
 
-	return pcc + Clock_Decrementer_value * rtemsTicks;
+	return pcc + HRC_PERIOD * rtemsTicks;
 }
 
 static inline pcc_t setPccBase()
 {
 unsigned oldbase = tick_base;
 	tick_base = Clock_driver_ticks;
-	return Clock_Decrementer_value * (tick_base - oldbase);
+	return HRC_PERIOD * (tick_base - oldbase);
 }
-
-#else /* if method_B elif !pictimer */
-/* pictimer.c provides an implementation for method A */
-extern pcc_t getPcc();
-extern pcc_t setPccBase();
 #endif
 
-#else	/* ifdef __PPC__ */
 
-#warning No High Resolution Clock Implementation for this CPU, please add to pcc.h (DISABLED)
-#define  USE_NO_HIGH_RESOLUTION_CLOCK
-
-#endif
-
-#endif /* ifdef USE_NO_HIGH_RESOLUTION_CLOCK */
-
-#ifdef USE_NO_HIGH_RESOLUTION_CLOCK
+#else /* ifdef USE_NO_HIGH_RESOLUTION_CLOCK */
 
 static inline pcc_t getPcc() 		{ return 0; }
 static inline pcc_t setPccBase() 	{ return 0; }
