@@ -29,6 +29,8 @@
  */
 #if !defined(NTP_L64)
 
+#include <stdint.h>
+
 /*
  * Double precision macros for 32-bit machines
  *
@@ -44,8 +46,13 @@
  *   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *
  */
+#if 1
+#define int32	int32_t
+#define u_int32	uint32_t
+#else
 typedef long int32;
 typedef unsigned long u_int32;
+#endif
 typedef struct {			/* basic type in two formats */
 	union {
 		u_int32 Xl_ui;
