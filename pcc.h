@@ -1,6 +1,8 @@
 #ifndef NTP_PCC_HEADER_H
 #define NTP_PCC_HEADER_H
 
+#include <stdint.h>
+
 /* there might be mild dependencies on sizeof(pcc_t) being >= sizeof(long) */
 
 #define PCC_WIDTH 32
@@ -120,7 +122,7 @@ unsigned rval = MCF5282_PIT3_PCNTR;
  * --> getPcc reads the PCC and adds (ticks-base) * clock_period
  */
 
-static rtems_unsigned32 tick_base;
+static uint32_t tick_base;
 
 static inline pcc_t getPcc()
 {
