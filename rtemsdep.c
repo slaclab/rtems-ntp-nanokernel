@@ -54,7 +54,6 @@
 
 /* =========== PUBLIC GLOBALS ======================== */
 volatile unsigned      rtems_ntp_debug = 0;
-volatile unsigned      rtems_ntp_daemon_sync_interval_secs = DAEMON_SYNC_INTERVAL_SECS;
 FILE		  		   *rtems_ntp_debug_file = 0;
 
 /* =========== GLOBAL VARIABLES ====================== */
@@ -335,23 +334,49 @@ int rval;
 	return rval;
 }
 
+static rtems_interval
+get_poll_interval()
+{
+struct timex   ntv;
+rtems_interval rate;
+
+	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
+	ntv.modes = 0;
+	if ( ntp_adjtime(&ntv) ) {
+		printk("NTP: warning; unable to determine poll interval; using 600s\n");
+		return rate * 600;
+	}
+	return rate * (1<<ntv.constant);
+}
+
+/* Convenience routine to set poll interval */
+int
+rtemsNtpSetPollInterval(int poll_seconds)
+{
+struct timex ntv;
+
+	if ( poll_seconds < 16 )
+		poll_seconds = 16;
+
+	ntv.status   = STA_PLL:
+	ntv.constant = secs2tcld(poll_seconds);
+	ntv.modes    = MOD_TIMECONST | MOD_STATUS;
+	return ntp_adjtime(&ntv);
+}
+
 static rtems_task
 ntpDaemon(rtems_task_argument unused)
 {
 rtems_status_code     rc;
-rtems_interval        rate;
 rtems_event_set       got;
 long                  nsecs;
 int                   retry;
 DiffTimeCbDataRec     d;
 
-	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
-
-
 	while ( RTEMS_TIMEOUT == (rc = rtems_event_receive(
 									KILL_DAEMON,
 									RTEMS_WAIT | RTEMS_EVENT_ANY,
-									rate * rtems_ntp_daemon_sync_interval_secs,
+									get_poll_interval(),
 									&got )) ) {
 		for ( retry = 0; retry < 3; retry++  ) {
 
@@ -372,6 +397,9 @@ DiffTimeCbDataRec     d;
 			locked_hardupdate( nsecs ); 
 
 			if ( rtems_ntp_debug ) {
+				rtems_task_priority old_p;
+				/* Lower priority for printing */
+				rtems_task_set_priority(RTEMS_SELF, 180, &old_p);
 				if ( rtems_ntp_debug_file ) {
 					/* log difference in microseconds */
 					fprintf(rtems_ntp_debug_file,"%.5g\n", 1000000.*(double)d.diff/4./(double)(1<<30));
@@ -380,6 +408,8 @@ DiffTimeCbDataRec     d;
 					long secs = int2sec(d.diff);
 					printf("Update diff %li %sseconds\n", secs ? secs : nsecs, secs ? "" : "nano");
 				}
+				/* Restore priority */
+				rtems_task_set_priority(RTEMS_SELF, old_p, &old_p);
 			}
 #endif
 			break;
@@ -550,12 +580,12 @@ struct timex          ntv;
 struct timespec       initime;
 
 	if ( ! tickerPri ) {
-		tickerPri = 30; /* higher than network and most other things */
+		tickerPri = 35;
 	}
 	if ( ! daemonPri ) {
 		daemonPri = rtems_bsdnet_config.network_task_priority;
 		if ( ! daemonPri )
-			daemonPri = 100;
+			daemonPri = 30;
 
 		if ( daemonPri > 2 )
 			daemonPri -= 2;
@@ -565,7 +595,7 @@ struct timespec       initime;
 	ntv.offset = 0;
 	ntv.freq = 0;
 	ntv.status = STA_PLL;
-	ntv.constant = secs2tcld(10);
+	ntv.constant = secs2tcld(DAEMON_SYNC_INTERVAL_SECS);
 	ntv.modes = MOD_STATUS | MOD_NANO |
 	            MOD_TIMECONST |
 	            MOD_OFFSET | MOD_FREQUENCY;

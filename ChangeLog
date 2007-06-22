@@ -1,0 +1,4 @@
+2007/06/22 (TS):
+	- removed global 'poll-interval' variable. We should use the NTP
+	  internal that can be set via ntp_adjtime() so that NTP knows
+	  what the poll interval is.
