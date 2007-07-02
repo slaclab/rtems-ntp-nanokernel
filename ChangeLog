@@ -1,3 +1,5 @@
+2007/07/02 (TS):
+	- install timex.h into include/sys
 2007/06/22 (TS):
 	- removed global 'poll-interval' variable. We should use the NTP
 	  internal that can be set via ntp_adjtime() so that NTP knows
