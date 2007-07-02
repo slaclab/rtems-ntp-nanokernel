@@ -104,6 +104,7 @@ ifndef RTEMS_SITE_INSTALLDIR
 RTEMS_SITE_INSTALLDIR = $(PROJECT_RELEASE)
 endif
 
+${RTEMS_SITE_INSTALLDIR}/include/sys \
 ${RTEMS_SITE_INSTALLDIR}/include \
 ${RTEMS_SITE_INSTALLDIR}/lib \
 ${RTEMS_SITE_INSTALLDIR}/bin:
@@ -112,6 +113,6 @@ ${RTEMS_SITE_INSTALLDIR}/bin:
 # Install the program(s), appending _g or _p as appropriate.
 # for include files, just use $(INSTALL_CHANGE)
 #
-install:  all $(RTEMS_SITE_INSTALLDIR)/bin
+install:  all $(RTEMS_SITE_INSTALLDIR)/bin ${RTEMS_SITE_INSTALLDIR}/include/sys
 	$(INSTALL_VARIANT) -m 555 ${PGMS} ${PGMS:%.exe=%.bin} ${PGMS:%.exe=%.sym} ${RTEMS_SITE_INSTALLDIR}/bin
-	$(INSTALL_CHANGE) -m 444 ${INST_HEADERS} ${RTEMS_SITE_INSTALLDIR}/include
+	$(INSTALL_CHANGE) -m 444 ${INST_HEADERS} ${RTEMS_SITE_INSTALLDIR}/include/sys
