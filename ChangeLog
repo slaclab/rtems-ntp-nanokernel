@@ -1,4 +1,13 @@
 2007/07/15 (TS):
+	- Changes to rtems daemon and ticker:
+		* Use shorter default poll/sync
+		  interval to match the default timeconstant (per Mills paper).
+		* make daemon task id public.
+		* make PPC-specific snippets #ifdef __PPC__ only.
+		* more accurate conversion of seconds to LD of time-constant.
+		  Closer to rounding rather than truncating.
+		* changed return value of nano_time() from pcc_t to long.
+2007/07/15 (TS):
 	- Various (small) changes to host test program:
 		* use -fno-common (and a few explicit ini- statements) to make sure
 		  all variables are initialized to zero.

@@ -38,7 +38,7 @@
 #define		NTP_DEBUG_MISC          2   /* misc utils (beware of symbol clashes) */
 #define     NTP_DEBUG_FILTER		4   /* print info about trivial filtering algorithm */
 
-#define DAEMON_SYNC_INTERVAL_SECS	600	/* default sync interval */
+#define DAEMON_SYNC_INTERVAL_SECS	64	/* default sync interval */
 
 #define KILL_DAEMON					RTEMS_EVENT_1
 
@@ -67,8 +67,8 @@ struct timeval TIMEVAR;		/* kernel microsecond clock */
 int microset_flag[NCPUS];	/* microset() initialization filag */
 int hz;
 
-static rtems_id daemon_id = 0;
        rtems_id rtems_ntp_ticker_id = 0;
+       rtems_id rtems_ntp_daemon_id = 0;
 static rtems_id kill_sem;
 static rtems_id mutex_id  = 0;
 #ifndef USE_PICTIMER
@@ -213,7 +213,9 @@ long			tbnow;
 			udat->diff = diff;
 #if (NTP_DEBUG & NTP_DEBUG_PACKSTATS)
 			if ( llabs(diff) > llabs(rtems_ntp_max_diff) ) {
+#ifdef __PPC__
 				asm volatile("mftb %0":"=r"(tbnow));
+#endif
 				rtems_ntp_max_t1 = org;
 				rtems_ntp_max_t2 = org ? rcv : 0;
 				rtems_ntp_max_t3 = nts2ll( &p->transmit_timestamp );
@@ -304,13 +306,20 @@ rtemsNtpPacketGet(void *p)
 }
 #endif
 
+/* Convert poll seconds to PLL time constant. According to the
+ * documentation the polling interval tracks the time-constant 
+ * and a constant of 0 corresponds to a 16s polling interval.
+ */
 static unsigned
 secs2tcld(int secs)
 {
 unsigned rval,probe;
+	secs >>= 4;	/* divide by 16; const == 2^0  ~ poll_interval == 16s */
+	/* find closest power of two */
 	for ( rval = 0, probe=1; probe < secs; rval++ )
 		probe <<= 1;
-	return rval;
+
+	return ( (probe<<1) - secs < secs - probe ) ? rval + 1 : rval;
 }
 
 static int
@@ -358,7 +367,7 @@ struct timex ntv;
 	if ( poll_seconds < 16 )
 		poll_seconds = 16;
 
-	ntv.status   = STA_PLL:
+	ntv.status   = STA_PLL;
 	ntv.constant = secs2tcld(poll_seconds);
 	ntv.modes    = MOD_TIMECONST | MOD_STATUS;
 	return ntp_adjtime(&ntv);
@@ -438,7 +447,7 @@ static struct timeval	nanobase;
 
 unsigned long long lasttime = 0;
 
-pcc_t
+long
 nano_time(struct timespec *tp)
 {
 
@@ -670,8 +679,8 @@ struct timespec       initime;
 								RTEMS_MINIMUM_STACK_SIZE,
 								RTEMS_DEFAULT_MODES,
 								RTEMS_DEFAULT_ATTRIBUTES | RTEMS_FLOATING_POINT,
-								&daemon_id) ||
-	     RTEMS_SUCCESSFUL != rtems_task_start( daemon_id, ntpDaemon, 0) ) {
+								&rtems_ntp_daemon_id) ||
+	     RTEMS_SUCCESSFUL != rtems_task_start( rtems_ntp_daemon_id, ntpDaemon, 0) ) {
 		printf("NTP daemon couldn't be started :-(\n");
 		return -1;
 	}
@@ -714,10 +723,10 @@ int rtemsNtpCleanup()
 								RTEMS_LOCAL | RTEMS_SIMPLE_BINARY_SEMAPHORE,
 								0,
 								&kill_sem) ) {
-			if ( daemon_id ) {
-				PARANOIA( rtems_event_send( daemon_id, KILL_DAEMON ) );
+			if ( rtems_ntp_daemon_id ) {
+				PARANOIA( rtems_event_send( rtems_ntp_daemon_id, KILL_DAEMON ) );
 				PARANOIA( rtems_semaphore_obtain( kill_sem, RTEMS_WAIT, RTEMS_NO_TIMEOUT ) );
-				PARANOIA( rtems_task_delete( daemon_id ));
+				PARANOIA( rtems_task_delete( rtems_ntp_daemon_id ));
 			}
 			if ( rtems_ntp_ticker_id ) {
 #ifdef USE_PICTIMER
