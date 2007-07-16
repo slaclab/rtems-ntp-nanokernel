@@ -3,7 +3,8 @@
 #
 PROGRAM= kern
 COMPILER= gcc
-COPTS= -Wall
+#T.S: Lots of uninitialied variables (assumed to be zero) -> use -fno-common
+COPTS= -Wall -fno-common
 BINDIR= /usr/local/bin
 INSTALL= install
 DEFS=

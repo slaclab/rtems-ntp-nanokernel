@@ -1,3 +1,14 @@
+2007/07/15 (TS):
+	- Various (small) changes to host test program:
+		* use -fno-common (and a few explicit ini- statements) to make sure
+		  all variables are initialized to zero.
+		  This resolved strange effects (different results for different
+		  runs with same parameters) which were traced to undef.
+		  initialization states.
+		* added '-P' option so that poll-interval can be set independent
+		  of PLL time-constant.
+		* call 'display()' at every 'tick' rather than only when poll-interval
+		  expires.
 2007/07/02 (TS):
 	- install timex.h into include/sys
 2007/06/22 (TS):

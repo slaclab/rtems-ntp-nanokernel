@@ -17,6 +17,7 @@
  **********************************************************************/
 
 #include "kern.h"
+#include "pcc-host.h"
 
 /*
  * Nanosecond time routines

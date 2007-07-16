@@ -128,7 +128,7 @@ extern void second_overflow(struct timeval *);
 extern double gauss(double);
 extern void ntp_init(void);
 extern void hardpps(struct timespec *, long);
-extern unsigned long nano_time(struct timespec *);
+extern long nano_time(struct timespec *);
 extern void microset(void);
 
 /* allow for running in task driven mode: 

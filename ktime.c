@@ -91,16 +91,16 @@
 
 int time_state = TIME_OK;	/* clock state */
 int time_status = STA_UNSYNC;	/* clock status bits */
-long time_tai;			/* TAI offset (s) */
-long time_monitor;		/* last time offset scaled (ns) */
-long time_constant;		/* poll interval (shift) (s) */
+long time_tai = 0;			/* TAI offset (s) */
+long time_monitor = 0;		/* last time offset scaled (ns) */
+long time_constant  = 0;	/* poll interval (shift) (s) */
 long time_precision = 1;	/* clock precision (ns) */
 long time_maxerror = MAXPHASE / 1000; /* maximum error (us) */
 long time_esterror = MAXPHASE / 1000; /* estimated error (us) */
-long time_reftime;		/* time at last adjustment (s) */
-long time_tick;			/* nanoseconds per tick (ns) */
+long time_reftime = 0;		/* time at last adjustment (s) */
+long time_tick = 0;			/* nanoseconds per tick (ns) */
 #if !defined(NTP_NANO)
-long time_nano;			/* nanoseconds past last tick */
+long time_nano = 0;			/* nanoseconds past last tick */
 #endif /* NTP_NANO */
 l_fp time_offset;		/* time offset (ns) */
 l_fp time_freq;			/* frequency offset (ns/s) */

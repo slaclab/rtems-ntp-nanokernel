@@ -91,31 +91,31 @@ int master_cpu = MASTER_CPU;	/* current master CPU number */
 /*
  * Simulator variables
  */
-static double time_real;	/* real time (s) */
-static double time_read;	/* kernel time (s) */
-static double time_tack;	/* next tick interrupt time */
-static double time_pps;		/* next PPS interrupt time (s) */
-static double sim_phase;	/* phase offset */
-static double delay[NSTAGE];	/* delay shift register */
-static double sim_freq;		/* frequency offset */
+static double time_real = 0.;	/* real time (s) */
+static double time_read = 0.;	/* kernel time (s) */
+static double time_tack = 0.;	/* next tick interrupt time */
+static double time_pps = 0.;		/* next PPS interrupt time (s) */
+static double sim_phase = 0.;	/* phase offset */
+static double delay[NSTAGE]={0.};	/* delay shift register */
+static double sim_freq = 0.;		/* frequency offset */
 static double sim_begin = -1;	/* begin simulation time (s) */
 static double sim_end = 1000;	/* end simulation time (s) */
-static double walk;		/* random-walk frequency parameter */
-static long poll_interval;	/* poll counter */
-static int priority;		/* CPU priority (just for looks) */
+static double walk=0.;		/* random-walk frequency parameter */
+static long poll_interval=0;	/* poll counter */
+static int priority=0;		/* CPU priority (just for looks) */
 static int poll = 1;		/* poll interval (s) */
-static int delptr;		/* delay register pointer */
-static int delmax;		/* delay max */
-static int debug;		/* der go derbug */
-static struct timex ntv;	/* for ntp_adjtime() */
-static long nsec;		/* nanoseconds of the second */
-static int cpu_intr;		/* current processor number */
-static int fixcnt;		/* tick counter */
+static int delptr=0;		/* delay register pointer */
+static int delmax=0;		/* delay max */
+static int debug=0;		/* der go derbug */
+static struct timex ntv = { 0};	/* for ntp_adjtime() */
+static long nsec = 0;		/* nanoseconds of the second */
+static int cpu_intr = 0;		/* current processor number */
+static int fixcnt = 0;		/* tick counter */
 static long cpu_clock[8] = {433000000L, 432980000L, 432990000L,
     433000000L, 433010000L, 433020000L, 233000000L, 333000000L};
 static long long cycles[NCPUS];	/* PCCs in each processor */
-static FILE *fp;		/* file pointer */
-static int fmtsw;		/* output format switch */
+static FILE *fp = 0;		/* file pointer */
+static int fmtsw = 0;		/* output format switch */
 
 /*
  * This is the current system time
@@ -157,7 +157,7 @@ main(
 	ntv.constant = 0;
 	ntv.modes = MOD_STATUS | MOD_NANO;
 	while ((temp = getopt(argc, argcv,
-	    "ac:dD:f:F:l:m:p:r:s:t:w:z:")) != -1) {
+	    "ac:dD:f:F:l:m:p:P:r:s:t:w:z:")) != -1) {
 		switch (temp) {
 
 			/*
@@ -247,13 +247,20 @@ main(
 			continue;
 
 			/*
-			 * -t specify poll interval and time constant
+			 * -t specify time constant
 			 * (shift)
 			 */
 			case 't':
 			sscanf(optarg, "%ld", &ntv.constant);
-			poll = 1 << ntv.constant;
+			poll = 1<<ntv.constant;
 			ntv.modes |= MOD_TIMECONST;
+			continue;
+
+			/*
+			 * -P specify poll interval
+			 */
+			case 'P':
+				sscanf(optarg,"%d",&poll);
 			continue;
 
 			/*
@@ -350,11 +357,13 @@ time.tv_sec, time.tv_nsec);
 						delptr = (delptr + 1) % delmax;
 					}
 					chime();
-					display();
+					/* display(); */
 				}
+				/* T.S: moved display from after chime to after brace */
+				display();
 				if (walk > 0)
 					sim_freq += gauss(walk);
-			}
+			} /*balance }*/
 			cpu_intr = master_cpu;
 			if (fixcnt < NCPUS) {
 				cpu_intr = fixcnt;
