@@ -7,6 +7,11 @@
 
 USE_PICTIMER=NO
 USE_METHOD_B=NO
+# use pentium tsc register as a high resolution counter
+# Enabling this on any arch other than x86 has no effect.
+# DO NOT use this on a  x86 CPU < pentium or ntpclock will
+# crash!
+USE_RDTSC=YES
 
 # C source names, if any, go here -- minus the .c
 C_PIECES=ktime rtemsdep $(C_PIECES_USE_PICTIMER_$(USE_PICTIMER))
@@ -17,6 +22,7 @@ C_PIECES_USE_PICTIMER_YES=pictimer
 C_PIECES_USE_PICTIMER_NO=
 DEFINES_USE_PICTIMER_YES=-DUSE_PICTIMER
 DEFINES_USE_METHOD_B_YES=-DUSE_METHOD_B_FOR_DEMO
+DEFINES_USE_RDTSC_YES=-DUSE_RDTSC
 
 # C++ source names, if any, go here -- minus the .cc
 CC_PIECES=
@@ -61,6 +67,7 @@ include $(RTEMS_ROOT)/make/leaf.cfg
 
 DEFINES  += $(DEFINES_USE_PICTIMER_$(USE_PICTIMER))
 DEFINES  += $(DEFINES_USE_METHOD_B_$(USE_METHOD_B))
+DEFINES  += $(DEFINES_USE_RDTSC_$(USE_RDTSC))
 CPPFLAGS +=
 CFLAGS   +=
 

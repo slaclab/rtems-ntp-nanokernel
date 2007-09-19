@@ -14,6 +14,7 @@
 #include <rtems/rtems_bsdnet.h>
 #include <netinet/in.h>
 #include <string.h>
+#include <stdlib.h>
 #include <time.h>
 #include <assert.h>
 
@@ -114,10 +115,12 @@ long long rtems_ntp_max_diff   = 0;
 long      rtems_ntp_max_tbdiff = 0;
 #endif
 
-static inline long long llabs(n)
+#if 0
+static inline long long llabs(long long n)
 {
 	return n < 0 ? -n : n;
 }
+#endif
 #endif
 
 #ifdef USE_METHOD_B_FOR_DEMO
@@ -180,7 +183,7 @@ static int diffTimeCb(struct ntpPacketSmall *p, int state, void *usr_data)
 {
 DiffTimeCbData	udat = usr_data;
 struct timespec nowts;
-long long       now, diff, org, rcv;
+long long       now, diff, org, rcv = 0;
 #if (NTP_DEBUG & NTP_DEBUG_PACKSTATS) && defined(__PPC__)
 static long		tbthen;
 long			tbnow;
@@ -355,7 +358,7 @@ rtems_interval rate;
 		printk("NTP: warning; unable to determine poll interval; using 600s\n");
 		return rate * 600;
 	}
-	return rate * (1<<ntv.constant);
+	return rate * (1<<(ntv.constant+4));
 }
 
 /* Convenience routine to set poll interval */
@@ -411,7 +414,7 @@ DiffTimeCbDataRec     d;
 				rtems_task_set_priority(RTEMS_SELF, 180, &old_p);
 				if ( rtems_ntp_debug_file ) {
 					/* log difference in microseconds */
-					fprintf(rtems_ntp_debug_file,"%.5g\n", 1000000.*(double)d.diff/4./(double)(1<<30));
+					fprintf(rtems_ntp_debug_file,"Diff: %.5g us (0x%016llx; %ld ns)\n", 1000000.*(double)d.diff/4./(double)(1<<30), d.diff, nsecs);
 					fflush(rtems_ntp_debug_file);
 				} else {
 					long secs = int2sec(d.diff);
@@ -450,9 +453,7 @@ unsigned long long lasttime = 0;
 long
 nano_time(struct timespec *tp)
 {
-
 unsigned long long pccl, thistime;
-pcc_t	rval;
 
 	pccl = getPcc();
 
@@ -462,8 +463,6 @@ pcc_t	rval;
 	tp->tv_sec   = nanobase.tv_sec;
 	tp->tv_nsec  = nanobase.tv_usec * 1000;
 #endif
-
-	rval = pccl;
 
 	/* convert to nanoseconds */
 	if ( pcc_denominator ) {
@@ -486,7 +485,7 @@ pcc_t	rval;
 		tp->tv_nsec = thistime % NANOSECOND;
 	}
 
-	return rval;
+	return (long)pccl;
 }
 
 unsigned long tsillticks=0;
@@ -791,7 +790,7 @@ struct timex ntp;
 		fprintf(stderr,"       frequency offset %11.3f ""ppm""\n", (double)ntp.freq/PPM_SCALED);
 		fprintf(stderr,"             max  error %11li ""uS""\n",   ntp.maxerror);
 		fprintf(stderr,"        estimated error %11li ""uS""\n",   ntp.esterror);
-		fprintf(stderr,"          poll interval %11i  ""S""\n",    1<<ntp.constant);
+		fprintf(stderr,"          poll interval %11i  ""S""\n",    1<<(ntp.constant+4));
 		fprintf(stderr,"              precision %11li "UNITS"\n",  ntp.precision);
 		fprintf(stderr,"              tolerance %11.3f ""ppm""\n", (double)ntp.tolerance/PPM_SCALED);
 		fprintf(stderr,"    PLL updates enabled %s\n", yesno(&ntp, STA_PLL));

@@ -4,9 +4,17 @@
 #include <stdint.h>
 
 /* there might be mild dependencies on sizeof(pcc_t) being >= sizeof(long) */
+#if defined(__i386__) && defined(USE_RDTSC)
+
+#define PCC_WIDTH 64
+typedef uint64_t pcc_t;
+
+#else
 
 #define PCC_WIDTH 32
 typedef unsigned long pcc_t;
+
+#endif
 
 /* There are two methods for implementing nanosecond
  * clock resolution:
@@ -102,6 +110,29 @@ unsigned rval = MCF5282_PIT3_PCNTR;
 #define HRC_READ() UC5282_HRC_READ()
 #define HRC_PERIOD	BSP_Configuration.microseconds_per_tick
 
+#elif /* ifdef __PPC__ */ defined(__i386__) && defined(USE_RDTSC)
+
+static pcc_t last_tick = 0;
+
+static inline pcc_t rdtsc()
+{
+uint32_t hi, lo;
+	__asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+	return ((((pcc_t)hi)<<32) | lo);
+}
+
+static pcc_t getPcc()
+{
+	return rdtsc() - last_tick;
+}
+
+static inline pcc_t setPccBase()
+{
+pcc_t old = last_tick;
+	last_tick = rdtsc();
+	return old ? (last_tick - old) : 0;
+}
+
 #else /* ifdef __PPC__ */
 
 #warning No High Resolution Clock Implementation for this CPU, please add to pcc.h (DISABLED)
@@ -109,7 +140,7 @@ unsigned rval = MCF5282_PIT3_PCNTR;
 
 #endif
 
-#if defined(HRC_PERIOD) && defined(HRC_READ)
+#if defined(HRC_READ)
 /* this routine returns the difference between the current PCC
  * and the PCC base time (==IRQ time).
  * In Method A, we know that the base time is actually always 0.
@@ -127,7 +158,7 @@ static uint32_t tick_base;
 static inline pcc_t getPcc()
 {
 unsigned        flags;
-unsigned        pcc;
+pcc_t           pcc;
 unsigned		rtemsTicks;
 
 	/* reading the PCC (the decrementer register) and
@@ -159,7 +190,10 @@ unsigned oldbase = tick_base;
 #endif
 
 
-#else /* ifdef USE_NO_HIGH_RESOLUTION_CLOCK */
+#endif /* ifdef USE_NO_HIGH_RESOLUTION_CLOCK */
+
+/* Test again; USE_NO_xxx could be defined since the last test... */
+#ifdef USE_NO_HIGH_RESOLUTION_CLOCK
 
 static inline pcc_t getPcc() 		{ return 0; }
 static inline pcc_t setPccBase() 	{ return 0; }

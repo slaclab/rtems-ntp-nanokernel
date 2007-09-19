@@ -1,3 +1,9 @@
+2007/09/18 (TS):
+	- Fixed time-const -> seconds conversion; needs to be multiplied by 16.
+	- Added PCC implementation for x86 ( >= pentium; rdtsc is not available
+	  on i386, i486).
+	- added pcc-host.h (for kern.c host test program)
+	- added more debugging info.
 2007/07/15 (TS):
 	- Changes to rtems daemon and ticker:
 		* Use shorter default poll/sync
