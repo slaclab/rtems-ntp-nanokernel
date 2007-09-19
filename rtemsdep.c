@@ -811,3 +811,23 @@ struct timex ntp;
 							pcc_numerator ? (double)pcc_denominator/(double)pcc_numerator*1000. : (double)-1.);
 	return 0;
 }
+
+int
+rtemsNtpPrintTime(FILE *fp)
+{
+struct ntptimeval ntv;
+char              buf[30];
+
+	if ( ntp_gettime(&ntv) )
+		return -1;
+
+	if ( !fp )
+		fp = stdout;
+
+	if ( fp != (FILE*)-1 ) {
+		ctime_r(&ntv.time.tv_sec, buf);
+		fprintf(fp,"%s",buf);
+	}
+	
+	return ntv.time.tv_sec;
+}
