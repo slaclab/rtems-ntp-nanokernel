@@ -12,6 +12,7 @@
 #include <bsp/irq.h>
 */
 #include <rtems/rtems_bsdnet.h>
+#include <rtems/bspIo.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <stdlib.h>
