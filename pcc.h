@@ -108,7 +108,11 @@ unsigned rval = MCF5282_PIT3_PCNTR;
 }
 
 #define HRC_READ() UC5282_HRC_READ()
+#if RTEMS_VERSION_AT_LEAST(4,8,99)
+#define HRC_PERIOD	rtems_configuration_get_microseconds_per_tick()
+#else
 #define HRC_PERIOD	BSP_Configuration.microseconds_per_tick
+#endif
 
 #elif /* ifdef __PPC__ */ defined(__i386__) && defined(USE_RDTSC)
 

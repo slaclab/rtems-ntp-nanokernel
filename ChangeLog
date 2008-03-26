@@ -1,3 +1,6 @@
+2008/03/25 (TS):
+	- rtems 4.8.99 has no BSP_Configuration anymore; use 
+	  'rtems_configuration_get_microseconds_per_tick()' instead.
 2007/09/18 (TS):
 	- Fixed time-const -> seconds conversion; needs to be multiplied by 16.
 	- Added PCC implementation for x86 ( >= pentium; rdtsc is not available
