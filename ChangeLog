@@ -1,3 +1,7 @@
+2008/04/10 (TS):
+	- maintain STA_UNSYNC bit so that ntp_gettime fails when we cannot
+	  contact the NTP server. The daemon now should update this bit whenever
+	  it loses or regains connection with the server.
 2008/03/25 (TS):
 	- rtems 4.8.99 has no BSP_Configuration anymore; use 
 	  'rtems_configuration_get_microseconds_per_tick()' instead.
