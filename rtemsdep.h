@@ -20,4 +20,12 @@
 #error Configuration error -- cannot use PICTIMER on non-PowerPC arch
 #endif
 
+#ifndef RTEMS_VERSION_AT_LEAST
+#define RTEMS_VERSION_AT_LEAST(ma,mi,re) \
+	(    __RTEMS_MAJOR__  > (ma)	\
+	 || (__RTEMS_MAJOR__ == (ma) && __RTEMS_MINOR__  > (mi))	\
+	 || (__RTEMS_MAJOR__ == (ma) && __RTEMS_MINOR__ == (mi) && __RTEMS_REVISION__ >= (re)) \
+    )
+#endif
+
 #endif
