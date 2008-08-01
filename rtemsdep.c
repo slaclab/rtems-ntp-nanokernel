@@ -12,6 +12,7 @@
 #include <bsp/irq.h>
 */
 #include <rtems/rtems_bsdnet.h>
+#include <rtems/bspIo.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <stdlib.h>
@@ -51,6 +52,11 @@
 
 #define PPM_SCALE					(1<<16)
 #define PPM_SCALED					((double)PPM_SCALE)
+
+/* If no server can be contacted after 'MAX_FAILED_SYNCS' poll intervals
+ * then the clock goes into STA_UNSYNC (unsynchronized status).
+ */
+#define MAX_FAILED_SYNCS			10
 
 
 /* =========== PUBLIC GLOBALS ======================== */
@@ -370,7 +376,11 @@ struct timex ntv;
 	if ( poll_seconds < 16 )
 		poll_seconds = 16;
 
-	ntv.status   = STA_PLL;
+	ntv.modes    = 0;
+	if ( ntp_adjtime(&ntv) )
+		return -1;
+
+	ntv.status  |= STA_PLL;
 	ntv.constant = secs2tcld(poll_seconds);
 	ntv.modes    = MOD_TIMECONST | MOD_STATUS;
 	return ntp_adjtime(&ntv);
@@ -384,13 +394,28 @@ rtems_event_set       got;
 long                  nsecs;
 int                   retry;
 DiffTimeCbDataRec     d;
+struct timex          ntv;
+int                   new_sync_stat;
+int                   failedsyncs;
+
+	ntv.modes = 0;
+	ntp_adjtime(&ntv);
+
+	/* initial lookup suceeded (during init); claim we're synced */
+	ntv.status &= ~ STA_UNSYNC;
+	ntv.modes = MOD_STATUS;
+
+	ntp_adjtime(&ntv);
+
+
+	failedsyncs = 0;
 
 	while ( RTEMS_TIMEOUT == (rc = rtems_event_receive(
 									KILL_DAEMON,
 									RTEMS_WAIT | RTEMS_EVENT_ANY,
 									get_poll_interval(),
 									&got )) ) {
-		for ( retry = 0; retry < 3; retry++  ) {
+		for ( retry = 3; retry > 0; retry--  ) {
 
 			/* try a request but drop answers with excessive roundtrip time */
 			if ( 0 != rtems_bsdnet_get_ntp(-1, diffTimeCb, &d) || 
@@ -428,8 +453,29 @@ DiffTimeCbDataRec     d;
 
 		}
 
+		if ( !retry ) {
+			failedsyncs++;
+		} else 
+			failedsyncs = 0;
+
+		if ( failedsyncs > MAX_FAILED_SYNCS ) {
+			new_sync_stat = ntv.status & ~STA_UNSYNC;
+			/* prevent from overflowing */
+			failedsyncs = MAX_FAILED_SYNCS + 1;
+		} else {
+			new_sync_stat = ntv.status |  STA_UNSYNC;
+		}
+
+		/* update 'synced' status if necessary */
+		if ( new_sync_stat != ntv.status )
+			ntp_adjtime(&ntv);
+
 		/* TODO: sync / calibrate hwclock hook */
 	}
+
+	ntv.status |= STA_UNSYNC;
+	ntp_adjtime(&ntv);
+
 	if ( RTEMS_SUCCESSFUL == rc && (KILL_DAEMON==got) ) {
 		rtems_semaphore_release(kill_sem);
 		/* DONT delete ourselves; note the race condition - our creator
@@ -602,7 +648,7 @@ struct timespec       initime;
 
 	ntv.offset = 0;
 	ntv.freq = 0;
-	ntv.status = STA_PLL;
+	ntv.status = STA_PLL | STA_UNSYNC;
 	ntv.constant = secs2tcld(DAEMON_SYNC_INTERVAL_SECS);
 	ntv.modes = MOD_STATUS | MOD_NANO |
 	            MOD_TIMECONST |
@@ -810,4 +856,24 @@ struct timex ntp;
 							pcc_numerator,
 							pcc_numerator ? (double)pcc_denominator/(double)pcc_numerator*1000. : (double)-1.);
 	return 0;
+}
+
+int
+rtemsNtpPrintTime(FILE *fp)
+{
+struct ntptimeval ntv;
+char              buf[30];
+
+	if ( ntp_gettime(&ntv) )
+		return -1;
+
+	if ( !fp )
+		fp = stdout;
+
+	if ( fp != (FILE*)-1 ) {
+		ctime_r(&ntv.time.tv_sec, buf);
+		fprintf(fp,"%s",buf);
+	}
+	
+	return ntv.time.tv_sec;
 }
