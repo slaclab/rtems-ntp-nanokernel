@@ -98,6 +98,7 @@ extern pcc_t setPccBase();
 #elif defined(__mcf528x__)
 
 #include <bsp.h>
+#include <mcf5282/mcf5282.h>
 
 #warning "High-resolution clock implementation for the uC5282 BSP only - but I can't check for BSP in header"
 
