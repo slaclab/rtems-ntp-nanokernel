@@ -18,6 +18,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <assert.h>
+#include <math.h>
+
+#include <sys/socket.h>
 
 #include <cexp.h>
 
@@ -84,6 +87,9 @@ static volatile int tickerRunning = 0;
 #ifdef USE_METHOD_B_FOR_DEMO
 static rtems_id sysclk_irq_id = 0;
 #endif
+
+int    rtems_ntp_daemon_sd          = 0;
+static int our_sd                   = 0;
 
 /* Mutex Primitives (compat with ktime.c / micro.c) */
 
@@ -180,9 +186,18 @@ long rval = f>>32;
 	return rval < 0 ? rval + 1 : rval;
 }
 
+#define LEAP_MSK	0xc0
+#define LEAP_INS	0x40
+#define LEAP_DEL	0x80
+#define LEAP_NO     0x00
+
 typedef struct DiffTimeCbData_ {
-	long long		diff;
-	unsigned long	tripns;
+	long long			diff;
+	unsigned long		tripns;
+	unsigned char   	li_vn_mode;
+	uint32_t 			srv_rcvts;
+	uint32_t            rootdelay; /* this is a single-precision 'fixed-point' number */
+	uint32_t            rootdisp;  /* this is a single-precision 'fixed-point' number */
 } DiffTimeCbDataRec, *DiffTimeCbData;
 
 static int diffTimeCb(struct ntpPacketSmall *p, int state, void *usr_data)
@@ -219,7 +234,11 @@ long			tbnow;
 			} else {
 				udat->tripns = 0;
 			}
-			udat->diff = diff;
+			udat->diff       = diff;
+			udat->li_vn_mode = p->li_vn_mode;
+			udat->srv_rcvts  = ntohl(p->receive_timestamp.integer);
+			udat->rootdelay  = ntohl(p->root_delay);
+			udat->rootdisp   = ntohl(p->root_dispersion);
 #if (NTP_DEBUG & NTP_DEBUG_PACKSTATS)
 			if ( llabs(diff) > llabs(rtems_ntp_max_diff) ) {
 #ifdef __PPC__
@@ -293,7 +312,7 @@ unsigned
 rtemsNtpDiff()
 {
 DiffTimeCbDataRec d;
-	if ( 0 == rtems_bsdnet_get_ntp(-1,diffTimeCb, &d) ) {
+	if ( 0 == rtems_bsdnet_get_ntp(rtems_ntp_daemon_sd,diffTimeCb, &d) ) {
 		printf("%lli; %lis; %lins\n",d.diff, int2sec(d.diff), frac2nsec(d.diff));
 		printf("%lli; %lis; %lins\n",-d.diff, -int2sec(-d.diff), -frac2nsec(-d.diff));
 		printf("total roundtrip time was %luns\n", d.tripns);
@@ -311,7 +330,7 @@ static int copyPacketCb(struct ntpPacketSmall *p, int state, void *usr_data)
 unsigned
 rtemsNtpPacketGet(void *p)
 {
-	return rtems_bsdnet_get_ntp(-1,copyPacketCb,p);
+	return rtems_bsdnet_get_ntp(rtems_ntp_daemon_sd,copyPacketCb,p);
 }
 #endif
 
@@ -328,7 +347,7 @@ unsigned rval,probe;
 	for ( rval = 0, probe=1; probe < secs; rval++ )
 		probe <<= 1;
 
-	return ( (probe<<1) - secs < secs - probe ) ? rval + 1 : rval;
+	return ( probe - secs < secs - (probe>>1) ) ? rval : rval - 1;
 }
 
 static int
@@ -388,25 +407,30 @@ struct timex ntv;
 
 static rtems_task
 ntpDaemon(rtems_task_argument unused)
+
 {
 rtems_status_code     rc;
 rtems_event_set       got;
 long                  nsecs;
-int                   retry;
-DiffTimeCbDataRec     d;
+float                 last_fusecs=0., jitter=0., ftmp, ftmp1, fusecs, maxerr=0.;
+int                   retry, shots;
+DiffTimeCbDataRec     data[2];
+unsigned char         best, try;
 struct timex          ntv;
-int                   new_sync_stat;
 int                   failedsyncs;
+unsigned char         leap;
+unsigned              r_s;
 
 	ntv.modes = 0;
 	ntp_adjtime(&ntv);
 
 	/* initial lookup suceeded (during init); claim we're synced */
 	ntv.status &= ~ STA_UNSYNC;
-	ntv.modes = MOD_STATUS;
+	ntv.modes   = MOD_STATUS;
 
 	ntp_adjtime(&ntv);
 
+	ntv.modes  |= MOD_MAXERROR | MOD_ESTERROR;
 
 	failedsyncs = 0;
 
@@ -415,23 +439,64 @@ int                   failedsyncs;
 									RTEMS_WAIT | RTEMS_EVENT_ANY,
 									get_poll_interval(),
 									&got )) ) {
+
 		for ( retry = 3; retry > 0; retry--  ) {
 
-			/* try a request but drop answers with excessive roundtrip time */
-			if ( 0 != rtems_bsdnet_get_ntp(-1, diffTimeCb, &d) || 
-			     !acceptFiltered(d.tripns) )
+			/* Do a few shots and remember the best one */
+			shots = 0;
+			try   = best = 0;
+			while ( retry > 0 ) {
+				if ( rtems_bsdnet_get_ntp(rtems_ntp_daemon_sd, diffTimeCb, &data[try]) ) {
+					--retry;	
+					continue;
+				}
+
+				/* Use <= so that we switch after the first try */
+				if ( data[try].tripns <= data[best].tripns ) {
+					best = try;
+					try  = (best+1)%2;
+				}
+
+				if ( ++shots >= 3 )
+					break;
+				
+				/* wait for some randomized delay */
+				rtems_task_wake_after( (rtems_interval)(rand_r(&r_s) & 63) );
+			}
+
+			/* If no shot succeeded we give up for this time */
+			if ( !shots )
+				break;
+
+			/* drop answers with excessive roundtrip time */
+			if ( !acceptFiltered(data[best].tripns) )
 				continue;
-			
-		
-			if ( d.diff > nsec2frac(MAXPHASE) )
+
+			if ( data[best].diff > nsec2frac(MAXPHASE) )
 				nsecs =  MAXPHASE;
-			else if ( d.diff < -nsec2frac(MAXPHASE) )
+			else if ( data[best].diff < -nsec2frac(MAXPHASE) )
 				nsecs = -MAXPHASE;
 			else
-				nsecs = frac2nsec(d.diff);
+				nsecs = frac2nsec(data[best].diff);
 
 #ifndef USE_PROFILER_RAW
 			locked_hardupdate( nsecs ); 
+
+			{
+				/* statistics; basic algorithm stolen from ntpd */
+				fusecs = (float)nsecs/1000.;
+
+				ftmp   = jitter*jitter;
+				ftmp1  = last_fusecs - fusecs;
+				ftmp1  = ftmp1*ftmp1;
+
+				jitter = sqrtf( ftmp + (ftmp1 - ftmp)/8. );
+
+				last_fusecs = fusecs;
+
+				maxerr = (float)data[best].rootdelay/65536. + 2.*(float)data[best].rootdisp/65536.;
+				maxerr = 1.0E6*maxerr; /* in uS */
+			}
 
 			if ( rtems_ntp_debug ) {
 				rtems_task_priority old_p;
@@ -439,10 +504,10 @@ int                   failedsyncs;
 				rtems_task_set_priority(RTEMS_SELF, 180, &old_p);
 				if ( rtems_ntp_debug_file ) {
 					/* log difference in microseconds */
-					fprintf(rtems_ntp_debug_file,"Diff: %.5g us (0x%016llx; %ld ns)\n", 1000000.*(double)d.diff/4./(double)(1<<30), d.diff, nsecs);
+					fprintf(rtems_ntp_debug_file,"Diff: %.5g us (0x%016llx; %ld ns)\n", 1000000.*(double)data[best].diff/4./(double)(1<<30), data[best].diff, nsecs);
 					fflush(rtems_ntp_debug_file);
 				} else {
-					long secs = int2sec(d.diff);
+					long secs = int2sec(data[best].diff);
 					printf("Update diff %li %sseconds\n", secs ? secs : nsecs, secs ? "" : "nano");
 				}
 				/* Restore priority */
@@ -453,26 +518,67 @@ int                   failedsyncs;
 
 		}
 
-		if ( !retry ) {
+		if ( retry <= 0 ) {
 			failedsyncs++;
-		} else 
+		} else  {
 			failedsyncs = 0;
 
+			/* Check for leap seconds */
+			switch ( leap = (data[best].li_vn_mode & LEAP_MSK) ) {
+				case LEAP_NO:
+					ntv.status &= ~(STA_INS | STA_DEL);
+				break;
+
+				default:	/* ignore '3' for now */
+				break;
+
+				case LEAP_INS:
+				case LEAP_DEL:
+				{
+				struct tm tm;
+				time_t    tmp = data[best].srv_rcvts;
+
+		            tmp -= rtems_bsdnet_timeoffset + UNIX_BASE_TO_NTP_BASE;
+					/* Only announce to the kernel clock on the last day
+					 * of June or December.
+					 */
+					if (    gmtime_r(&tmp, &tm) 
+					    &&  (  (tm.tm_mon + 1 ==  6 && tm.tm_mday == 30)
+						     ||
+					           (tm.tm_mon + 1 == 12 && tm.tm_mday == 31) 
+							) ) {
+						if ( LEAP_INS == leap )
+							ntv.status |= STA_INS;
+						else
+							ntv.status |= STA_DEL;
+					}
+				}
+				break;
+			}
+		}
+
 		if ( failedsyncs > MAX_FAILED_SYNCS ) {
-			new_sync_stat = ntv.status & ~STA_UNSYNC;
+			ntv.status |= STA_UNSYNC;
 			/* prevent from overflowing */
 			failedsyncs = MAX_FAILED_SYNCS + 1;
 		} else {
-			new_sync_stat = ntv.status |  STA_UNSYNC;
+			ntv.status &= ~STA_UNSYNC;
 		}
 
-		/* update 'synced' status if necessary */
-		if ( new_sync_stat != ntv.status )
-			ntp_adjtime(&ntv);
+		if ( retry > 0 ) {
+			ntv.maxerror = maxerr;
+			ntv.esterror = jitter;
+			ntv.modes  |= MOD_MAXERROR | MOD_ESTERROR;
+		} else {
+			ntv.modes  &= ~ (MOD_MAXERROR | MOD_ESTERROR);
+		}
+
+		ntp_adjtime(&ntv);
 
 		/* TODO: sync / calibrate hwclock hook */
 	}
 
+	ntv.modes  &= ~ (MOD_MAXERROR | MOD_ESTERROR);
 	ntv.status |= STA_UNSYNC;
 	ntp_adjtime(&ntv);
 
@@ -627,11 +733,22 @@ rtems_event_set		got;
 }
 #endif
 
+static void
+closeSd()
+{
+	if ( our_sd ) {
+		close(rtems_ntp_daemon_sd);
+		rtems_ntp_daemon_sd = 0;
+		our_sd = 0;
+	}
+}
+
 int
 rtemsNtpInitialize(unsigned tickerPri, unsigned daemonPri)
 {
 struct timex          ntv;
 struct timespec       initime;
+struct sockaddr_in    me;
 
 	if ( ! tickerPri ) {
 		tickerPri = 35;
@@ -669,22 +786,37 @@ struct timespec       initime;
 	ntp_init();
 	ntp_adjtime(&ntv);
 
-	fprintf(stderr,"Trying to contact NTP server; (timeout ~1min.)... ");
-	fflush(stderr);
-
 #ifdef USE_PICTIMER
 	if ( pictimerInstallClock( TIMER_NO ) ) {
 		return -1;
 	}
 #endif
 
+	if ( rtems_ntp_daemon_sd ) {
+		if ( rtems_ntp_daemon_sd < 0 ) {
+			/* let NTP code create/delete socket */
+			rtems_ntp_daemon_sd = -1;
+		}   /* else use pre-opened socked */
+	} else {
+		if ( (rtems_ntp_daemon_sd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+			fprintf(stderr, "rtemsNtpInitialize(): unable to create socket: %s\n", strerror(errno));
+			goto bail;
+		}
+		our_sd = 1;
+		memset(&me, 0, sizeof(me));
+		if ( bind(rtems_ntp_daemon_sd, (struct sockaddr*)&me, sizeof(me)) ) {
+			fprintf(stderr, "rtemsNtpInitialize(): unable to bind socket: %s\n", strerror(errno));
+			goto bail;
+		}
+	}
+
+	fprintf(stderr,"Trying to contact NTP server; (timeout ~1min.)... ");
+	fflush(stderr);
+
 	/* initialize time */
-	if ( rtems_bsdnet_get_ntp(-1, 0, &initime) ) {
+	if ( rtems_bsdnet_get_ntp(rtems_ntp_daemon_sd, 0, &initime) ) {
 		fprintf(stderr,"FAILED: check networking setup and try again\n");
-#ifdef USE_PICTIMER
-		pictimerCleanup(TIMER_NO);
-#endif
-		return -1;
+		goto bail;
 	}
 	fprintf(stderr,"OK\n");
 
@@ -703,7 +835,7 @@ struct timespec       initime;
 								0,
 								&mutex_id ) ) {
 		printf("Unable to create mutex\n");
-		return -1;
+		goto bail;
 	}
 
 	if ( RTEMS_SUCCESSFUL != rtems_task_create(
@@ -715,7 +847,7 @@ struct timespec       initime;
 								&rtems_ntp_ticker_id) ||
 	     RTEMS_SUCCESSFUL != rtems_task_start( rtems_ntp_ticker_id, tickerDaemon, 0) ) {
 		printf("Clock Ticker daemon couldn't be started :-(\n");
-		return -1;
+		goto bail;
 	}
 
 	if ( RTEMS_SUCCESSFUL != rtems_task_create(
@@ -727,7 +859,8 @@ struct timespec       initime;
 								&rtems_ntp_daemon_id) ||
 	     RTEMS_SUCCESSFUL != rtems_task_start( rtems_ntp_daemon_id, ntpDaemon, 0) ) {
 		printf("NTP daemon couldn't be started :-(\n");
-		return -1;
+		/* PICTIMER might still be in use; */
+		goto bail1;
 	}
 
 #ifdef USE_METHOD_B_FOR_DEMO
@@ -751,6 +884,13 @@ struct timespec       initime;
 	fprintf(stderr,"         please contribute to <ntpNanoclock/pcc.h>\n");
 #endif
 	return 0;
+bail:
+#ifdef USE_PICTIMER
+	pictimerCleanup(TIMER_NO);
+#endif
+bail1:
+	closeSd();
+	return -1;
 }
 
 int rtemsNtpCleanup()
@@ -796,6 +936,9 @@ int rtemsNtpCleanup()
 
 	if ( mutex_id )
 		PARANOIA( rtems_semaphore_delete( mutex_id ) );
+
+	closeSd();
+
 #ifdef USE_PROFILER
 	return pictimerProfileCleanup();
 #else

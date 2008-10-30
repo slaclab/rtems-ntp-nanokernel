@@ -1,3 +1,20 @@
+2008/09/22 (TS):
+	- added support for independent socket to be used for communicating
+	  with the server.
+2008/05/12 (TS):
+	- added support for leap-seconds. Leap-seconds announced by the NTP
+	  server are now passed to the ticker (via ntp_adjtime + STA_INS/STA_DEL)
+	  on the last day of june/december).
+	- changed daemon algorithm: always do 3 shots at the server and
+	  use the best one (min. round-trip time) for synchronization.
+	  [rtems_bsdnet_get_ntp() should probably be changed to always
+	  query multiple servers so we can use the best one instead of the
+	  first one.]
+	- fixed ld2 algorithm (secs2tcld) when calculating the time-constant.
+	  Would return too big a value when 'secs' argument was not a power
+	  of two.
+	- compute maxerr / esterr (use algorithm similar to ntpd) and
+	  pass to ntp_adjtime to give better statistics.
 2008/04/10 (TS):
 	- maintain STA_UNSYNC bit so that ntp_gettime fails when we cannot
 	  contact the NTP server. The daemon now should update this bit whenever
