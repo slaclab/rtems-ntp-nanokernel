@@ -746,9 +746,9 @@ closeSd()
 int
 rtemsNtpInitialize(unsigned tickerPri, unsigned daemonPri)
 {
-struct timex          ntv;
-struct timespec       initime;
-struct sockaddr_in    me;
+struct timex    ntv;
+struct timespec initime;
+struct sockaddr me;
 
 	if ( ! tickerPri ) {
 		tickerPri = 35;
@@ -804,7 +804,8 @@ struct sockaddr_in    me;
 		}
 		our_sd = 1;
 		memset(&me, 0, sizeof(me));
-		if ( bind(rtems_ntp_daemon_sd, (struct sockaddr*)&me, sizeof(me)) ) {
+		me.sa_family = AF_INET;
+		if ( bind(rtems_ntp_daemon_sd, &me, sizeof(me)) ) {
 			fprintf(stderr, "rtemsNtpInitialize(): unable to bind socket: %s\n", strerror(errno));
 			goto bail;
 		}
