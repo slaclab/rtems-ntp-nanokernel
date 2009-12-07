@@ -9,6 +9,7 @@ ntpclock_SOURCES      = ktime.c rtemsdep.c
 ntpclock_SOURCES     += high.h kern.h l_fp.h pcc.h pcc-host.h pictimer.h
 ntpclock_SOURCES     += high.h kern.h l_fp.h pcc.h pcc-host.h pictimer.h
 ntpclock_SOURCES     += rtemsdep.h tpro.h
+ntpclock_CPPFLAGS     = -DUSE_RDTSC
 
 #EXTRA_DIST=pictimer.c
 #EXTRA_DIST+=gauss.c hightime.c jitter.c kern.c micro.c noise.c profile.c tprotime.c
