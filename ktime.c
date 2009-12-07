@@ -644,6 +644,10 @@ hardupdate(tvp, offset)
 	if (mtemp >= MINSEC && (time_status & STA_FLL || mtemp >
 	    MAXSEC)) {
 		L_LINT(ftemp, (time_monitor << 4) / mtemp);
+/* gcc warns about 'negative right shift' -- it's too dumb to evaluate
+ * the comparisons of constant expressions and to realize that the
+ * affected block cannot be executed.
+ */
 		L_RSHIFT(ftemp, SHIFT_FLL + 4);
 		L_ADD(time_freq, ftemp);
 		time_status |= STA_MODE;

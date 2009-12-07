@@ -1,3 +1,10 @@
+2009/12/07 (TS):
+
+	- Makefile.am: define USE_RDTSC for now. Should best be a run-time check...
+
+	- ktime.c: added comment that it is safe to ignore gcc warning about
+	  negative right shift.
+
 2008/09/22 (TS):
 	- added support for independent socket to be used for communicating
 	  with the server.
