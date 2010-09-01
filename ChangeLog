@@ -1,3 +1,7 @@
+2010/09/01 (TS):
+
+	- kern.c: Fixed memory corruption (loop iterator > array size).
+
 2009/12/07 (TS):
 
 	- Makefile.am: define USE_RDTSC for now. Should best be a run-time check...

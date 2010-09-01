@@ -149,7 +149,7 @@ main(
 #else
 	TIMEVAR.tv_sec = TIMEVAR.tv_usec = 0;
 #endif /* NTP_NANO */
-	for (i = 0; i < 8; i++)
+	for (i = 0; i < NCPUS; i++)
 		cycles[i] = random();
 	ntv.offset = 0;
 	ntv.freq = 0;
