@@ -1,7 +1,7 @@
 /* $Id$ */
 
 
-/* RTEMS support for Dave Mill's ktime and a very simple NTP synchronization daemon */
+/* RTEMS support for Dave Mills' ktime and a very simple NTP synchronization daemon */
 
 /* Author: Till Straumann <strauman@slac.stanford.edu>, 2004 */
 
