@@ -1,3 +1,7 @@
+2010/10/12 (TS):
+
+	- rtemsdep.c: conditionally include <config.h> (for HAVE_CEXP).
+
 2010/09/02 (TS):
 
 	- rtemssim.c, rtemsdep.c, Makefile.host: Added simulator that mimicks

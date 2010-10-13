@@ -23,7 +23,13 @@
 
 #include <sys/socket.h>
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
+#ifdef HAVE_CEXP
 #include <cexp.h>
+#endif
 
 #include "kern.h"
 #include "rtemsdep.h"
@@ -956,11 +962,13 @@ int rtemsNtpCleanup()
 #endif
 }
 
+#ifdef HAVE_CEXP
 int
 _cexpModuleFinalize(void *handle)
 {
 	return rtemsNtpCleanup();
 }
+#endif
 
 
 #ifdef NTP_NANO
