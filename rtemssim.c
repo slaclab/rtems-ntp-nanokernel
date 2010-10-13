@@ -92,7 +92,7 @@ cpu_number(void)
 #define rtems_interrupt_enable(flags)  do {flags=0;} while (0)
 
 #define _USED_FROM_SIMULATOR_
-#include "rtems_micro.c"
+#include "rtemsdep.c"
 
 static int
 gd(const char *s, double *pd)
