@@ -1,3 +1,9 @@
+2010/09/02 (TS):
+
+	- rtemssim.c, rtemsdep.c, Makefile.host: Added simulator that mimicks
+	  what the RTEMS code does. Can be used to study behavior and tune
+	  parameters.
+
 2010/09/01 (TS):
 
 	- kern.c: Fixed memory corruption (loop iterator > array size).

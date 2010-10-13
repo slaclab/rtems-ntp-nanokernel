@@ -1,9 +1,10 @@
 /* $Id$ */
 
-
 /* RTEMS support for Dave Mills' ktime and a very simple NTP synchronization daemon */
 
 /* Author: Till Straumann <strauman@slac.stanford.edu>, 2004 */
+
+#ifndef _USED_FROM_SIMULATOR_
 
 #include <rtems.h>
 #include <bsp.h>
@@ -31,6 +32,8 @@
 
 #ifdef USE_PICTIMER
 #include "pictimer.h"
+#endif
+
 #endif
 
 
@@ -69,14 +72,15 @@ FILE		  		   *rtems_ntp_debug_file = 0;
 /* =========== GLOBAL VARIABLES ====================== */
 
 #ifdef NTP_NANO
-struct timespec TIMEVAR;	/* kernel nanosecond clock */
+struct timespec TIMEVAR = {0, 0};	/* kernel nanosecond clock */
 #else
-struct timeval TIMEVAR;		/* kernel microsecond clock */
+struct timeval TIMEVAR  = {0, 0};	/* kernel microsecond clock */
 #endif
 
-int microset_flag[NCPUS];	/* microset() initialization filag */
-int hz;
+int microset_flag[NCPUS] = {0,};	/* microset() initialization filag */
+int hz                   = 0;
 
+#ifndef _USED_FROM_SIMULATOR_
        rtems_id rtems_ntp_ticker_id = 0;
        rtems_id rtems_ntp_daemon_id = 0;
 static rtems_id kill_sem;
@@ -108,7 +112,6 @@ splx(int level)
 	return 0;
 }
 
-
 /*
  * RTEMS base: 1988, January 1
  *  UNIX base: 1970, January 1
@@ -117,6 +120,8 @@ splx(int level)
 #define UNIX_BASE_TO_NTP_BASE (((70UL*365UL)+17UL) * (24*60*60))
 
 #define PARANOIA(something)	assert( RTEMS_SUCCESSFUL == (something) )
+
+#endif
 
 #if NTP_DEBUG & NTP_DEBUG_PACKSTATS
 long long rtems_ntp_max_t1;
@@ -134,6 +139,107 @@ static inline long long llabs(long long n)
 }
 #endif
 #endif
+
+static unsigned long pcc_numerator;
+static unsigned long pcc_denominator = 0;
+#ifdef NTP_NANO
+static struct timespec	nanobase;
+#else
+static struct timeval	nanobase;
+#endif
+
+/* Convert poll seconds to PLL time constant. According to the
+ * documentation the polling interval tracks the time-constant 
+ * and a constant of 0 corresponds to a 16s polling interval.
+ */
+static unsigned
+secs2tcld(int secs)
+{
+unsigned rval,probe;
+	secs >>= 4;	/* divide by 16; const == 2^0  ~ poll_interval == 16s */
+	/* find closest power of two */
+	for ( rval = 0, probe=1; probe < secs; rval++ )
+		probe <<= 1;
+
+	if ( 0 == rval )
+		return 0;
+
+	return ( probe - secs < secs - (probe>>1) ) ? rval : rval - 1;
+}
+
+unsigned long long lasttime = 0;
+
+long
+nano_time(struct timespec *tp)
+{
+unsigned long long pccl, thistime;
+
+	pccl = getPcc();
+
+#ifdef NTP_NANO
+	*tp = nanobase;
+#else
+	tp->tv_sec   = nanobase.tv_sec;
+	tp->tv_nsec  = nanobase.tv_usec * 1000;
+#endif
+
+	/* convert to nanoseconds */
+	if ( pcc_denominator ) {
+		pccl *= pcc_numerator;
+		pccl /= pcc_denominator;
+		
+		thistime  = (unsigned long)tp->tv_sec;
+		thistime  = thistime * NANOSECOND + tp->tv_nsec + pccl;
+
+		/* prevent the clock from running backwards
+		 * (small backjumps may appear if a clock tick
+		 * adjustment is smaller than what the last nanoclock
+		 * prediction was...)
+		 */
+		if ( thistime <= lasttime )
+			thistime = lasttime + 1;
+		lasttime = thistime;
+
+		tp->tv_sec  = thistime / NANOSECOND;
+		tp->tv_nsec = thistime % NANOSECOND;
+	}
+
+	return (long)pccl;
+}
+
+unsigned long tsillticks=0;
+
+static inline void
+ticker_body()
+{
+int s;
+unsigned flags;
+
+	s = splclock();
+
+	ntp_tick_adjust(&TIMEVAR, 0);
+	second_overflow(&TIMEVAR);
+
+	rtems_interrupt_disable(flags);
+tsillticks++;
+
+	pcc_denominator = setPccBase();
+	pcc_numerator   = 
+#ifdef NTP_NANO
+		TIMEVAR.tv_nsec - nanobase.tv_nsec 
+#else
+		(TIMEVAR.tv_usec - nanobase.tv_usec) * 1000
+#endif
+		+ (TIMEVAR.tv_sec - nanobase.tv_sec) * NANOSECOND
+		;
+	nanobase = TIMEVAR;
+	rtems_interrupt_enable(flags);
+
+	splx(s);
+}
+
+
+#ifndef _USED_FROM_SIMULATOR_
 
 #ifdef USE_METHOD_B_FOR_DEMO
 static rtems_timer_service_routine sysclkIrqHook( rtems_id me, void *uarg )
@@ -334,20 +440,38 @@ rtemsNtpPacketGet(void *p)
 }
 #endif
 
-/* Convert poll seconds to PLL time constant. According to the
- * documentation the polling interval tracks the time-constant 
- * and a constant of 0 corresponds to a 16s polling interval.
- */
-static unsigned
-secs2tcld(int secs)
+/* Convenience routine to set poll interval */
+int
+rtemsNtpSetPollInterval(int poll_seconds)
 {
-unsigned rval,probe;
-	secs >>= 4;	/* divide by 16; const == 2^0  ~ poll_interval == 16s */
-	/* find closest power of two */
-	for ( rval = 0, probe=1; probe < secs; rval++ )
-		probe <<= 1;
+struct timex ntv;
 
-	return ( probe - secs < secs - (probe>>1) ) ? rval : rval - 1;
+	if ( poll_seconds < 16 )
+		poll_seconds = 16;
+
+	ntv.modes    = 0;
+	if ( ntp_adjtime(&ntv) )
+		return -1;
+
+	ntv.status  |= STA_PLL;
+	ntv.constant = secs2tcld(poll_seconds);
+	ntv.modes    = MOD_TIMECONST | MOD_STATUS;
+	return ntp_adjtime(&ntv);
+}
+
+static rtems_interval
+get_poll_interval()
+{
+struct timex   ntv;
+rtems_interval rate;
+
+	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
+	ntv.modes = 0;
+	if ( ntp_adjtime(&ntv) ) {
+		printk("NTP: warning; unable to determine poll interval; using 600s\n");
+		return rate * 600;
+	}
+	return rate * (1<<(ntv.constant+4));
 }
 
 static int
@@ -371,43 +495,9 @@ int rval;
 	return rval;
 }
 
-static rtems_interval
-get_poll_interval()
-{
-struct timex   ntv;
-rtems_interval rate;
-
-	rtems_clock_get( RTEMS_CLOCK_GET_TICKS_PER_SECOND , &rate );
-	ntv.modes = 0;
-	if ( ntp_adjtime(&ntv) ) {
-		printk("NTP: warning; unable to determine poll interval; using 600s\n");
-		return rate * 600;
-	}
-	return rate * (1<<(ntv.constant+4));
-}
-
-/* Convenience routine to set poll interval */
-int
-rtemsNtpSetPollInterval(int poll_seconds)
-{
-struct timex ntv;
-
-	if ( poll_seconds < 16 )
-		poll_seconds = 16;
-
-	ntv.modes    = 0;
-	if ( ntp_adjtime(&ntv) )
-		return -1;
-
-	ntv.status  |= STA_PLL;
-	ntv.constant = secs2tcld(poll_seconds);
-	ntv.modes    = MOD_TIMECONST | MOD_STATUS;
-	return ntp_adjtime(&ntv);
-}
 
 static rtems_task
 ntpDaemon(rtems_task_argument unused)
-
 {
 rtems_status_code     rc;
 rtems_event_set       got;
@@ -592,87 +682,6 @@ unsigned              r_s;
 	rtems_task_suspend( RTEMS_SELF );
 }
 
-static unsigned long pcc_numerator;
-static unsigned long pcc_denominator = 0;
-#ifdef NTP_NANO
-static struct timespec	nanobase;
-#else
-static struct timeval	nanobase;
-#endif
-
-unsigned long long lasttime = 0;
-
-long
-nano_time(struct timespec *tp)
-{
-unsigned long long pccl, thistime;
-
-	pccl = getPcc();
-
-#ifdef NTP_NANO
-	*tp = nanobase;
-#else
-	tp->tv_sec   = nanobase.tv_sec;
-	tp->tv_nsec  = nanobase.tv_usec * 1000;
-#endif
-
-	/* convert to nanoseconds */
-	if ( pcc_denominator ) {
-		pccl *= pcc_numerator;
-		pccl /= pcc_denominator;
-		
-		thistime  = (unsigned long)tp->tv_sec;
-		thistime  = thistime * NANOSECOND + tp->tv_nsec + pccl;
-
-		/* prevent the clock from running backwards
-		 * (small backjumps may appear if a clock tick
-		 * adjustment is smaller than what the last nanoclock
-		 * prediction was...)
-		 */
-		if ( thistime <= lasttime )
-			thistime = lasttime + 1;
-		lasttime = thistime;
-
-		tp->tv_sec  = thistime / NANOSECOND;
-		tp->tv_nsec = thistime % NANOSECOND;
-	}
-
-	return (long)pccl;
-}
-
-unsigned long tsillticks=0;
-
-extern unsigned long long time_adj;
-
-static inline void
-ticker_body()
-{
-int s;
-unsigned flags;
-
-	s = splclock();
-
-	ntp_tick_adjust(&TIMEVAR, 0);
-	second_overflow(&TIMEVAR);
-
-	rtems_interrupt_disable(flags);
-tsillticks++;
-
-	pcc_denominator = setPccBase();
-	pcc_numerator   = 
-#ifdef NTP_NANO
-		TIMEVAR.tv_nsec - nanobase.tv_nsec 
-#else
-		(TIMEVAR.tv_usec - nanobase.tv_usec) * 1000
-#endif
-		+ (TIMEVAR.tv_sec - nanobase.tv_sec) * NANOSECOND
-		;
-	nanobase = TIMEVAR;
-	rtems_interrupt_enable(flags);
-
-	splx(s);
-}
-
 
 #ifndef USE_PICTIMER
 
@@ -764,7 +773,7 @@ struct sockaddr me;
 	/* TODO: recover frequency from NVRAM; read time from hwclock */
 
 	ntv.offset = 0;
-	ntv.freq = 0;
+	ntv.freq   = 0;
 	ntv.status = STA_PLL | STA_UNSYNC;
 	ntv.constant = secs2tcld(DAEMON_SYNC_INTERVAL_SECS);
 	ntv.modes = MOD_STATUS | MOD_NANO |
@@ -1021,3 +1030,5 @@ char              buf[30];
 	
 	return ntv.time.tv_sec;
 }
+
+#endif

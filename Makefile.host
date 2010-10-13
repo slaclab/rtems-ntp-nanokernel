@@ -4,7 +4,7 @@
 PROGRAM= kern
 COMPILER= gcc
 #T.S: Lots of uninitialied variables (assumed to be zero) -> use -fno-common
-COPTS= -Wall -fno-common
+COPTS= -Wall -fno-common -g
 BINDIR= /usr/local/bin
 INSTALL= install
 DEFS=
@@ -14,14 +14,17 @@ CFLAGS= $(COPTS) $(DEFS) $(INCL)
 CC= $(COMPILER)
 LIB= -lm
 #
-SOURCE= kern.c ktime.c micro.c gauss.c
+SOURCE= kern.c ktime.c micro.c gauss.c rtemssim.c
 OBJS= kern.o ktime.o micro.o gauss.o
 EXEC= kern
 
-all:	$(PROGRAM)
+all:	$(PROGRAM) rtemssim
 
 kern:	$(OBJS)
 	$(CC) $(COPTS) -o $@ $(OBJS) $(LIB)
+
+rtemssim: rtemssim.c ktime.o
+	$(CC) $(COPTS) -o $@ $^ $(LIB)
 
 install: $(BINDIR)/$(PROGRAM)
 
