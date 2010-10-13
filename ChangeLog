@@ -1,3 +1,8 @@
+2010/10/13 (TS):
+
+	- Makefile.am: Updated EXTRA_DIST to hold all extra files.
+	  Added rules etc. to build rtemssim from this build system.
+
 2010/10/12 (TS):
 
 	- rtemsdep.c: conditionally include <config.h> (for HAVE_CEXP).
