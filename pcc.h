@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 /* there might be mild dependencies on sizeof(pcc_t) being >= sizeof(long) */
 #if defined(__i386__) && defined(USE_RDTSC)
 
@@ -109,10 +113,15 @@ unsigned rval = MCF5282_PIT3_PCNTR;
 }
 
 #define HRC_READ() UC5282_HRC_READ()
+
+#ifdef DECL_SRAM_PITC_PER_TICK /* in config.h */
+#define HRC_PERIOD  (__SRAMBASE.pitc_per_tick)
+#else
 #if RTEMS_VERSION_AT_LEAST(4,8,99)
 #define HRC_PERIOD	rtems_configuration_get_microseconds_per_tick()
 #else
 #define HRC_PERIOD	BSP_Configuration.microseconds_per_tick
+#endif
 #endif
 
 #elif /* ifdef __PPC__ */ defined(__i386__) && defined(USE_RDTSC)
