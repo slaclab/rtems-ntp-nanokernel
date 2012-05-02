@@ -1,3 +1,8 @@
+2012/05/02 (TS):
+
+	- pcc.h: uc5282 PIT timer period is no longer exactly 1E6 clicks
+	  (new clock frequency fix for 80MHz boards - PR1738).
+
 2009/12/07 (TS):
 
 	- Makefile.am: define USE_RDTSC for now. Should best be a run-time check...
